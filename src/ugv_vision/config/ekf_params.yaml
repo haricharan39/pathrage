@@ -1,0 +1,36 @@
+# robot_localization EKF config -- fuses SLAM pose with wheel odometry.
+#
+# TODO: tune the *_config boolean matrices and process_noise_covariance once
+# real (or simulated) sensor data is available; the values below are the
+# standard robot_localization starting point, not tuned for this robot.
+
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: true          # UGV assumed planar; revisit if slopes matter
+    publish_tf: true
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    odom0: /wheel/odometry
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+
+    pose0: /localization/slam_pose
+    pose0_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+
+    imu0: /camera/imu
+    imu0_config: [false, false, false,
+                  true,  true,  true,
+                  false, false, false,
+                  true,  true,  true,
+                  true,  true,  false]

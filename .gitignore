@@ -1,0 +1,26 @@
+# colcon build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+
+# Trained model weights -- distribute separately, not via git
+*.onnx
+*.pth
+*.pt
+
+# Datasets -- large, usually downloaded separately
+training/datasets/*
+!training/datasets/.gitkeep
+
+# Recorded rosbags -- large binary files
+bags/*
+!bags/.gitkeep
+
+# Editor/OS cruft
+.vscode/
+*.swp
+.DS_Store

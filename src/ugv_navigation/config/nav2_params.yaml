@@ -1,0 +1,27 @@
+# Nav2 parameter stub -- global planner (A*/D* Lite) + local planner (TEB).
+# TODO: tune inflation_radius, robot footprint, and TEB kinematic limits
+# once the real/simulated UGV's turning radius and max velocity are known.
+
+planner_server:
+  ros__parameters:
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"   # swap for a D* Lite plugin later
+      use_astar: true
+
+controller_server:
+  ros__parameters:
+    controller_plugins: ["FollowPath"]
+    FollowPath:
+      plugin: "teb_local_planner/TebLocalPlannerROS"
+      # TODO: max_vel_x, max_vel_theta, min_turning_radius, footprint
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      plugins: ["vision_layer", "inflation_layer"]
+      vision_layer:
+        plugin: "ugv_navigation/VisionCostmapLayer"   # placeholder plugin name
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.75   # TODO: tune against real obstacle sizes
