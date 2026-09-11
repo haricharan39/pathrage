@@ -54,8 +54,5 @@ source install/setup.bash
 ros2 launch ugv_navigation full_stack.launch.py
 ```
 
-## Status
-Scaffolding only -- see TODO comments in each node file for what's
-actually implemented vs. stubbed. Build order (see /docs for the full
-plan): sim environment -> Nav2 against Tier-1-only costmap -> add
-localization -> add Tier 2 segmentation -> stress test.
+
+
