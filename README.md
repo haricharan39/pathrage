@@ -6,7 +6,7 @@ This section explains how to clone the **visionnav-ugv** repository, create your
 
 ```bash
 git clone https://github.com/haricharan39/visionnav-ugv.git
-cd visionnav-ugv
+cd pathrage
 ```
 
 Check the repository:
