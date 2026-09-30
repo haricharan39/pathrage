@@ -19,8 +19,8 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>robot_localization</exec_depend>
-  <!-- ORB-SLAM3 / VINS-Fusion are external, non-rosdep packages -- see
-       docs/ for build instructions, they are not installed via rosdep. -->
+  <!-- ORB-SLAM3 / VINS-Fusion are external, non-rosdep packages
+    see docs/ for build instructions, they are not installed via rosdep. -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
