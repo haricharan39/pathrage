@@ -4,11 +4,6 @@
 
 ## Step 1: UGV model (URDF/Xacro), teleoperation in Gazebo, visualization in RViz
 
-<<<<<<< HEAD
-```bash
-git clone https://github.com/haricharan39/pathrage.git
-cd pathrage
-=======
 The first step of the project builds the simulation foundation that every later stage (stereo depth, visual SLAM, semantic segmentation, Nav2) runs on:
 
 1. Create a realistic URDF/Xacro model of the UGV.
@@ -51,7 +46,6 @@ odom                                  (from the diff-drive plugin)
             │   └── left_camera_optical_frame
             └── right_camera_frame
                 └── right_camera_optical_frame
->>>>>>> 0c05500 (presenting the ugv urdf in gazebo and rviz and teleoperating and testing the links for the ugv and stereo camera feed)
 ```
 
 Frames follow REP-103 (x forward, y left, z up). Optical frames use z forward, x right, y down. Each transform has a single publisher: `robot_state_publisher` publishes the fixed and wheel transforms, and the Gazebo plugin publishes `odom → base_footprint`.
@@ -95,13 +89,6 @@ sudo apt install -y ros-humble-gazebo-ros-pkgs ros-humble-xacro \
   ros-humble-rviz2 ros-humble-teleop-twist-keyboard \
   ros-humble-rqt-image-view ros-humble-tf2-tools \
   liburdfdom-tools graphviz
-```
-
-Add to `src/ugv_description/package.xml` (next to the other `exec_depend` lines):
-
-```xml
-<exec_depend>joint_state_publisher_gui</exec_depend>
-<exec_depend>rviz2</exec_depend>
 ```
 
 Build:
