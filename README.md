@@ -1,444 +1,263 @@
-# Team Git Workflow
+# PATHRAGE – VisionNav (SIH 2026, PS 26126)
 
-This section explains how to clone the **visionnav-ugv** repository, create your own branch using your name, make changes, and push your work without directly modifying `main`.
+**Autonomous Navigation in GPS-Denied Outdoor Environments**
 
-## 1. Clone the Repository
+## Step 1: UGV model (URDF/Xacro), teleoperation in Gazebo, visualization in RViz
 
+<<<<<<< HEAD
 ```bash
 git clone https://github.com/haricharan39/pathrage.git
 cd pathrage
+=======
+The first step of the project builds the simulation foundation that every later stage (stereo depth, visual SLAM, semantic segmentation, Nav2) runs on:
+
+1. Create a realistic URDF/Xacro model of the UGV.
+2. Spawn it in Gazebo Classic and drive it manually (teleoperation).
+3. Visualize the robot, TF tree and stereo camera streams in RViz2.
+
+**Stack:** Ubuntu 22.04 · ROS 2 Humble · Gazebo Classic 11 · RViz2 · URDF/Xacro
+
+---
+
+## 1. The robot
+
+A four-wheel-drive skid-steer UGV with one forward-facing stereo camera and no other sensors.
+
+| Item | Value (all configurable in the Xacro) |
+|---|---|
+| Chassis | 0.60 × 0.40 × 0.15 m box, 12 kg |
+| Ground clearance | 0.06 m |
+| Wheels | 4 × cylinders, radius 0.10 m, width 0.06 m, 1.2 kg each |
+| Track width / wheel base | 0.50 m / 0.40 m |
+| Drive | 4 actuated continuous joints, skid-steer via `libgazebo_ros_diff_drive` (2 wheel pairs) |
+| Electronics enclosure | Compact box on the chassis (part of `base_link`) |
+| Sensor bracket | Rigid post plus camera bar |
+| Stereo camera | 2 × Gazebo camera sensors, 0.12 m baseline, 640×480, 80° HFOV, 30 Hz |
+
+Wheel joints: `front_left_wheel_joint`, `front_right_wheel_joint`, `rear_left_wheel_joint`, `rear_right_wheel_joint`.
+
+### TF tree
+
+```
+odom                                  (from the diff-drive plugin)
+└── base_footprint
+    └── base_link
+        ├── front_left_wheel_link
+        ├── front_right_wheel_link
+        ├── rear_left_wheel_link
+        ├── rear_right_wheel_link
+        └── stereo_camera_link
+            ├── left_camera_frame
+            │   └── left_camera_optical_frame
+            └── right_camera_frame
+                └── right_camera_optical_frame
+>>>>>>> 0c05500 (presenting the ugv urdf in gazebo and rviz and teleoperating and testing the links for the ugv and stereo camera feed)
 ```
 
-Check the repository:
+Frames follow REP-103 (x forward, y left, z up). Optical frames use z forward, x right, y down. Each transform has a single publisher: `robot_state_publisher` publishes the fixed and wheel transforms, and the Gazebo plugin publishes `odom → base_footprint`.
 
-```bash
-git status
+### Topics
+
+| Topic | Type | Purpose |
+|---|---|---|
+| `/cmd_vel` | `geometry_msgs/Twist` | Drive command (input) |
+| `/odom` | `nav_msgs/Odometry` | Wheel odometry |
+| `/joint_states` | `sensor_msgs/JointState` | Wheel joint states |
+| `/stereo_camera/left/image_raw` | `sensor_msgs/Image` | Left image |
+| `/stereo_camera/left/camera_info` | `sensor_msgs/CameraInfo` | Left calibration |
+| `/stereo_camera/right/image_raw` | `sensor_msgs/Image` | Right image |
+| `/stereo_camera/right/camera_info` | `sensor_msgs/CameraInfo` | Right calibration (includes baseline term) |
+
+---
+
+## 2. Files for this step
+
+All files live in `src/ugv_description/`:
+
+```
+src/ugv_description/
+├── urdf/visionnav.urdf.xacro      # robot model, Gazebo plugins, stereo camera
+├── launch/display.launch.py       # RViz2 only (robot_state_publisher + joint GUI + RViz2)
+├── launch/gazebo.launch.py        # Gazebo + robot_state_publisher + spawn
+├── worlds/outdoor_offroad.world   # existing world, used as the default
+├── CMakeLists.txt                 # already installs urdf/ launch/ worlds/
+└── package.xml                    # needs joint_state_publisher_gui and rviz2 exec_depends
 ```
 
 ---
 
-## 2. Create Your Own Branch
-
-**Do not work directly on `main`.**
-
-Create a branch using **your name**:
+## 3. Setup
 
 ```bash
-git checkout -b <your-name>
+sudo apt update
+sudo apt install -y ros-humble-gazebo-ros-pkgs ros-humble-xacro \
+  ros-humble-robot-state-publisher ros-humble-joint-state-publisher-gui \
+  ros-humble-rviz2 ros-humble-teleop-twist-keyboard \
+  ros-humble-rqt-image-view ros-humble-tf2-tools \
+  liburdfdom-tools graphviz
 ```
 
-Example:
+Add to `src/ugv_description/package.xml` (next to the other `exec_depend` lines):
+
+```xml
+<exec_depend>joint_state_publisher_gui</exec_depend>
+<exec_depend>rviz2</exec_depend>
+```
+
+Build:
 
 ```bash
-git checkout -b hari
-```
-
-Check your branch:
-
-```bash
-git branch
-```
-
-You should see:
-
-```text
-* hari
-  main
-```
-
-The `*` shows your current branch.
-
-### Branch Naming Rule
-
-**Branch names must be the member's name.**
-
-Examples:
-
-```text
-hari
-rahul
-arjun
-sai
+source /opt/ros/humble/setup.bash
+cd ~/pathrage
+colcon build --packages-select ugv_description --symlink-install
+source install/setup.bash
 ```
 
 ---
 
-## 3. Work on Your Branch
-
-Make your changes normally.
-
-Check your changes:
+## 4. Validate the model
 
 ```bash
-git status
-```
-
-Review them:
-
-```bash
-git diff
+F=src/ugv_description/urdf/visionnav.urdf.xacro
+xacro $F > /tmp/visionnav.urdf
+check_urdf /tmp/visionnav.urdf                        # root should be base_footprint
+gz sdf -p /tmp/visionnav.urdf > /tmp/visionnav.sdf    # SDF conversion for Gazebo
+grep -c 'type="continuous"' /tmp/visionnav.urdf       # expect 4
+grep -c 'type="camera"' /tmp/visionnav.urdf           # expect 2
 ```
 
 ---
 
-## 4. Commit Your Changes
+## 5. Run
 
-Add your changes:
-
-```bash
-git add .
-```
-
-Commit them:
+Every terminal needs:
 
 ```bash
-git commit -m "Describe your changes"
+source /opt/ros/humble/setup.bash
+source ~/pathrage/install/setup.bash
 ```
 
-
-## 5. Push Your Branch
-
-Push your name-based branch to GitHub:
+### a) Model only in RViz2 (no Gazebo)
 
 ```bash
-git push -u origin <your-name>
+ros2 launch ugv_description display.launch.py
 ```
 
-Example:
+Opens RViz2 with the robot model and TF, plus a joint GUI to rotate the wheels.
+
+### b) Gazebo simulation
+
+**Terminal A**
 
 ```bash
-git push -u origin hari
+ros2 launch ugv_description gazebo.launch.py
+# options: gui:=false   x:=2.0 y:=1.0 yaw:=1.57   camera_baseline:=0.20
 ```
 
-Your branch will now appear on GitHub.
+### c) Teleoperate
 
-
-# Updating Your Branch
-
-Before starting work, get the latest changes from `main`.
-
-Make sure you are on your own branch:
+**Terminal B**
 
 ```bash
-git checkout <your-name>
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
-Get the latest changes:
+Keys: `i` forward · `,` back · `j` / `l` rotate left / right · `k` stop.
+
+
+### d) See the live robot in RViz2
+
+With Gazebo running, open RViz2 in another terminal:
 
 ```bash
-git fetch origin
+ros2 run rviz2 rviz2 --ros-args -p use_sim_time:=true
 ```
 
-Update your branch:
+In RViz2:
+- Set **Fixed Frame** to `odom` (the robot then moves as you drive).
+- **Add → RobotModel**, with Description Topic `/robot_description`.
+- **Add → TF**.
+- **Add → Image**, with Topic `/stereo_camera/left/image_raw` (and another for `right`).
+
+### e) Camera and TF checks
 
 ```bash
-git merge origin/main
+ros2 topic hz /stereo_camera/left/image_raw
+ros2 run rqt_image_view rqt_image_view
+cd /tmp && ros2 run tf2_tools view_frames
 ```
 
-If there are merge conflicts, ask the team before resolving complicated conflicts.
+### f) Complete test commands (Gazebo running, from a second terminal)
 
----
-
-# Recommended Daily Workflow
-
-### Start working
+**TF**
 
 ```bash
-git checkout <your-name>
-git fetch origin
-git merge origin/main
+cd /tmp && ros2 run tf2_tools view_frames                          # writes frames_*.pdf
+ros2 run tf2_ros tf2_echo base_footprint base_link                 # z = 0.10
+ros2 run tf2_ros tf2_echo base_footprint left_camera_optical_frame
+ros2 run tf2_ros tf2_echo left_camera_frame right_camera_frame     # y = -0.12 (baseline)
+ros2 topic info /tf -v | grep -E "Node name|Publisher count"
+ros2 topic info /joint_states -v | grep -E "Node name|Publisher count"
 ```
 
-### After making changes
+**Stereo camera**
 
 ```bash
-git status
-git add .
-git commit -m "Describe your changes"
-git push
+ros2 topic list | grep stereo_camera
+ros2 topic hz /stereo_camera/left/image_raw                        # about 30 Hz
+ros2 topic hz /stereo_camera/right/image_raw
+ros2 topic echo /stereo_camera/left/image_raw --once --field header.frame_id
+ros2 topic echo /stereo_camera/right/camera_info --once
+ros2 run rqt_image_view rqt_image_view
 ```
 
----
-
-# Branch Structure
-
-```text
-main
- │
- ├── hari
- │    └── my file changes
- │
- ├── member2
- │    └── Member 2's changes for main
- │
- └── member3
-      └── Member 3's changes from main
-```
-
-Each member works .
-
-Changes are merged into `main` through Pull Requests.
-
----
-
-# Important Rules
-
-### 1. Never push directly to `main`
-
-Always work on your own name-based branch.
-
-### 2. Branch name = your name
-
-### 3. Keep your branch updated
-
-Before starting work:
+**Wheel control**
 
 ```bash
-git fetch origin
-git merge origin/main
+ros2 topic info /cmd_vel
+ros2 topic echo /joint_states --once
+ros2 topic echo /odom --once
+ros2 node list
 ```
 
-### 4. Do not commit generated files
+**Motion checks (read odometry and wheel velocities after each move)**
 
-Normally, these should not be committed:
+```bash
+timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.4}}"
+ros2 topic echo /odom --once --field pose.pose.position            # x up by about 1.2 m
+timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: -0.4}}"
+ros2 topic echo /odom --once --field pose.pose.position            # back near 0
+timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.0}}"
+ros2 topic echo /joint_states --once --field velocity              # left/right equal and opposite
+timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.3}, angular: {z: 0.5}}"
+ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "{}"            # stop
+```
 
-```text
-build/
-install/
-log/
-__pycache__/
+**Save outputs to /tmp**
+
+```bash
+ros2 topic list > /tmp/topics.txt
+ros2 topic echo /odom --once > /tmp/odom.txt
+ros2 topic echo /joint_states --once > /tmp/joint_states.txt
+ros2 topic echo /stereo_camera/right/camera_info --once > /tmp/right_camera_info.txt
+```
+
+**Reset / cleanup**
+
+```bash
+ros2 service call /reset_simulation std_srvs/srv/Empty
+pkill -f gzserver; pkill -f gzclient
 ```
 
 ---
 
-# GitHub Authentication
+## 6. Logs
 
-Each team member should use **their own GitHub account**.
-
-**Never share your GitHub password.**
-
-If the repository is private, the repository owner must give each team member access to the repository.
-
----
-
-# Quick Reference
 
 ```bash
-# Clone
-git clone https://github.com/haricharan39/visionnav-ugv.git
-cd visionnav-ugv
-
-# Create your branch
-git checkout -b <your-name>
-
-# Work...
-
-# Check changes
-git status
-git diff
-
-# Stage
-git add .
-
-# Commit
-git commit -m "Describe your changes"
-
-# Push
-git push -u origin <your-name>
-
-# Update from main
-git fetch origin
-git merge origin/main
-```
-
-## Simple Workflow
-
-```text
-       main
-        │
-   ┌────┼────┐
-   ↓    ↓    ↓
- hari  rahul  arjun
-   │    │    │
-   │ changes │
-   │    │    │
-   └────┼────┘
-        ↓
-   Pull Request
-        ↓
-       main
-```
-
-**`main` = shared stable branch**
-
-**`your-name` = your personal branch**
-
-**Pull Request = merge your work into `main`**
-# GitHub SSH Setup
-
-Each team member must connect **their own GitHub account** using an SSH key.
-
-> **Never share your SSH private key or GitHub password.**
-
-## 1. Check for an Existing SSH Key
-
-```bash
-ls -al ~/.ssh
-```
-
-If you already have a key such as `id_ed25519`, you can use it. Otherwise, generate a new one.
-
-## 2. Generate an SSH Key
-
-```bash
-ssh-keygen -t ed25519 -C "your-github-email@example.com"
-```
-
-When prompted:
-
-```text
-Enter file in which to save the key:
-```
-
-Press **Enter** to use the default:
-
-```text
-~/.ssh/id_ed25519
-```
-
-Enter a passphrase when asked. It is recommended for security.
-
-## 3. Start the SSH Agent
-
-```bash
-eval "$(ssh-agent -s)"
-```
-
-Add your private key:
-
-```bash
-ssh-add ~/.ssh/id_ed25519
-```
-
-Verify:
-
-```bash
-ssh-add -l
-```
-
-## 4. Copy Your Public Key
-
-**Only copy the `.pub` file. Never share `id_ed25519`.**
-
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-Copy the entire output. It should look like:
-
-```text
-ssh-ed25519 AAAA... your-github-email@example.com
-```
-
-## 5. Add the Key to GitHub
-
-Open GitHub and go to :
-
-**Settings → SSH and GPG keys → New SSH key**
-
-Enter:
-
-```text
-Title: Ubuntu 22.04 - <your-name>
-Key type: Authentication Key
-Key: <paste your public key>
-```
-
-Click **Add SSH key**.
-
-## 6. Test the Connection
-
-Run:
-
-```bash
-ssh -T git@github.com
-```
-
-The first time, GitHub may ask:
-
-```text
-Are you sure you want to continue connecting (yes/no/[fingerprint])?
-```
-
-Type:
-
-```bash
-yes
-```
-
-A successful connection will show a message similar to:
-
-```text
-Hi <haricharan39>! You've successfully authenticated,
-but GitHub does not provide shell access.
-```
-
-Your SSH connection is now ready.
-
----
-
-# 7. Clone the Repository Using SSH
-
-Use the SSH URL instead of HTTPS:
-
-```bash
-git clone git@github.com:haricharan39/visionnav-ugv.git
-cd visionnav-ugv
-```
-
-## 8. Create Your Personal Branch
-
-Your branch name must be **your name**:
-
-```bash
-git checkout -b <your-name>
-```
-
-Example:
-
-```bash
-git checkout -b hari
-```
-
-## 9. Push Your Work
-
-After making changes:
-
-```bash
-git add .
-git commit -m "Describe your changes"
-git push -u origin <your-name>
-```
-
-Example:
-
-```bash
-git push -u origin hari
-```
-
-After the first push, future pushes only require:
-
-```bash
-git push
+ros2 launch ugv_description gazebo.launch.py 2>&1 | tee /tmp/gazebo_run.log
+grep -iE "error|warn|fail" /tmp/gazebo_run.log
+ls ~/.ros/log/latest
 ```
 
 ---
-
-### Security
-
-```text
-id_ed25519       → PRIVATE — NEVER SHARE
-id_ed25519.pub   → PUBLIC  — ADD TO GITHUB
-```
-
-Every one should generate **their own SSH key** and add it to **their own GitHub account**.

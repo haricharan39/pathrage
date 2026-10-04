@@ -1,0 +1,357 @@
+<?xml version="1.0"?>
+<!--
+  PATHRAGE - VisionNav UGV
+  ROS 2 Humble | Gazebo Classic 11 | REP-103 frames
+
+  4WD skid-steer UGV, exactly 4 actuated wheels, exactly 1 stereo camera assembly.
+  No other sensors.
+
+  TF tree (matches the required hierarchy):
+    base_footprint
+      base_link
+        front_left_wheel_link / front_right_wheel_link
+        rear_left_wheel_link  / rear_right_wheel_link
+        stereo_camera_link
+          left_camera_frame  -> left_camera_optical_frame
+          right_camera_frame -> right_camera_optical_frame
+
+  The electronics enclosure and the sensor bracket are part of base_link /
+  stereo_camera_link geometry (no extra links) so the TF tree stays exactly as specified.
+
+  Control: libgazebo_ros_diff_drive.so with num_wheel_pairs=2 (front pair + rear pair),
+  so left wheels and right wheels receive coordinated velocity commands from /cmd_vel.
+  Joint states come from libgazebo_ros_joint_state_publisher.so; wheel TF is published
+  ONLY by robot_state_publisher; odom->base_footprint ONLY by the diff-drive plugin.
+-->
+<robot name="visionnav" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ===================== CONFIGURABLE ARGUMENTS ===================== -->
+  <!-- Chassis -->
+  <xacro:arg name="chassis_length" default="0.60"/>
+  <xacro:arg name="chassis_width" default="0.40"/>
+  <xacro:arg name="chassis_height" default="0.15"/>
+  <xacro:arg name="chassis_mass" default="12.0"/>
+  <xacro:arg name="ground_clearance" default="0.06"/>
+  <!-- Wheels -->
+  <xacro:arg name="wheel_radius" default="0.10"/>
+  <xacro:arg name="wheel_width" default="0.06"/>
+  <xacro:arg name="wheel_mass" default="1.2"/>
+  <xacro:arg name="track_width" default="0.50"/>   <!-- left-right wheel centre distance -->
+  <xacro:arg name="wheel_base" default="0.40"/>    <!-- front-rear wheel centre distance -->
+  <!-- Stereo camera -->
+  <xacro:arg name="camera_baseline" default="0.12"/>
+  <xacro:arg name="camera_x" default="0.27"/>      <!-- from base_link, forward -->
+  <xacro:arg name="camera_z" default="0.30"/>      <!-- from base_link (axle height), up; must clear chassis top -->
+  <xacro:arg name="camera_width" default="640"/>
+  <xacro:arg name="camera_height" default="480"/>
+  <xacro:arg name="camera_hfov" default="1.3963"/> <!-- 80 deg -->
+  <xacro:arg name="camera_fps" default="30"/>
+
+  <xacro:property name="chassis_length" value="$(arg chassis_length)"/>
+  <xacro:property name="chassis_width" value="$(arg chassis_width)"/>
+  <xacro:property name="chassis_height" value="$(arg chassis_height)"/>
+  <xacro:property name="chassis_mass" value="$(arg chassis_mass)"/>
+  <xacro:property name="ground_clearance" value="$(arg ground_clearance)"/>
+  <xacro:property name="wheel_radius" value="$(arg wheel_radius)"/>
+  <xacro:property name="wheel_width" value="$(arg wheel_width)"/>
+  <xacro:property name="wheel_mass" value="$(arg wheel_mass)"/>
+  <xacro:property name="track_width" value="$(arg track_width)"/>
+  <xacro:property name="wheel_base" value="$(arg wheel_base)"/>
+  <xacro:property name="camera_baseline" value="$(arg camera_baseline)"/>
+  <xacro:property name="camera_x" value="$(arg camera_x)"/>
+  <xacro:property name="camera_z" value="$(arg camera_z)"/>
+  <xacro:property name="camera_width" value="$(arg camera_width)"/>
+  <xacro:property name="camera_height" value="$(arg camera_height)"/>
+  <xacro:property name="camera_hfov" value="$(arg camera_hfov)"/>
+  <xacro:property name="camera_fps" value="$(arg camera_fps)"/>
+
+  <!-- ===================== DERIVED VALUES ===================== -->
+  <!-- base_link sits at the wheel axle height; base_footprint is on the ground. -->
+  <xacro:property name="chassis_z" value="${ground_clearance + chassis_height/2 - wheel_radius}"/>
+  <xacro:property name="chassis_top_z" value="${chassis_z + chassis_height/2}"/>
+
+  <!-- Electronics enclosure (compact box on top of chassis, rear half) -->
+  <xacro:property name="enc_x" value="-0.10"/>
+  <xacro:property name="enc_l" value="0.22"/>
+  <xacro:property name="enc_w" value="0.18"/>
+  <xacro:property name="enc_h" value="0.07"/>
+
+  <!-- Sensor bracket (vertical post) + camera bar -->
+  <xacro:property name="cam_bar_depth" value="0.03"/>
+  <xacro:property name="cam_bar_height" value="0.03"/>
+  <xacro:property name="cam_bar_width" value="${camera_baseline + 0.04}"/>
+  <xacro:property name="post_size" value="0.03"/>
+  <xacro:property name="post_h" value="${camera_z - cam_bar_height/2 - chassis_top_z}"/>
+  <xacro:property name="post_x" value="${camera_x - cam_bar_depth/2 - post_size/2}"/>
+  <xacro:property name="camera_mass" value="0.30"/>
+
+  <xacro:property name="max_wheel_torque" value="20.0"/>
+  <xacro:property name="max_wheel_speed" value="30.0"/> <!-- rad/s -->
+
+  <!-- ===================== MATERIALS ===================== -->
+  <material name="chassis_grey"><color rgba="0.35 0.38 0.40 1.0"/></material>
+  <material name="enclosure_orange"><color rgba="0.95 0.50 0.10 1.0"/></material>
+  <material name="bracket_dark"><color rgba="0.15 0.15 0.17 1.0"/></material>
+  <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material>
+  <material name="lens_blue"><color rgba="0.05 0.10 0.40 1.0"/></material>
+
+  <!-- ===================== INERTIA MACROS ===================== -->
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertia ixx="${m*(y*y + z*z)/12.0}" ixy="0" ixz="0"
+             iyy="${m*(x*x + z*z)/12.0}" iyz="0"
+             izz="${m*(x*x + y*y)/12.0}"/>
+  </xacro:macro>
+
+  <!-- ===================== BASE ===================== -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <!-- Main chassis -->
+    <visual>
+      <origin xyz="0 0 ${chassis_z}" rpy="0 0 0"/>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+      <material name="chassis_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${chassis_z}" rpy="0 0 0"/>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+    </collision>
+
+    <!-- Electronics enclosure -->
+    <visual>
+      <origin xyz="${enc_x} 0 ${chassis_top_z + enc_h/2}" rpy="0 0 0"/>
+      <geometry><box size="${enc_l} ${enc_w} ${enc_h}"/></geometry>
+      <material name="enclosure_orange"/>
+    </visual>
+    <collision>
+      <origin xyz="${enc_x} 0 ${chassis_top_z + enc_h/2}" rpy="0 0 0"/>
+      <geometry><box size="${enc_l} ${enc_w} ${enc_h}"/></geometry>
+    </collision>
+
+    <!-- Rigid sensor bracket (vertical post) -->
+    <visual>
+      <origin xyz="${post_x} 0 ${chassis_top_z + post_h/2}" rpy="0 0 0"/>
+      <geometry><box size="${post_size} ${post_size} ${post_h}"/></geometry>
+      <material name="bracket_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="${post_x} 0 ${chassis_top_z + post_h/2}" rpy="0 0 0"/>
+      <geometry><box size="${post_size} ${post_size} ${post_h}"/></geometry>
+    </collision>
+
+    <!-- Lumped mass of chassis + enclosure + bracket, approximated as the chassis box -->
+    <inertial>
+      <origin xyz="0 0 ${chassis_z}" rpy="0 0 0"/>
+      <mass value="${chassis_mass}"/>
+      <xacro:box_inertia m="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}"/>
+    </inertial>
+  </link>
+
+  <!-- ===================== WHEELS ===================== -->
+  <!-- Wheel link frame is aligned with base_link (x fwd, y left, z up). Joint axis = +Y,
+       so positive joint velocity rolls the robot forward (REP-103). The cylinder (axis Z by
+       default) is rotated by +90 deg about X so its axis lies along Y. -->
+  <xacro:macro name="wheel" params="name x y">
+    <link name="${name}_wheel_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="wheel_black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${wheel_mass}"/>
+        <!-- Solid cylinder with its symmetry axis along Y -->
+        <inertia ixx="${wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)/12.0}" ixy="0" ixz="0"
+                 iyy="${wheel_mass*wheel_radius*wheel_radius/2.0}" iyz="0"
+                 izz="${wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)/12.0}"/>
+      </inertial>
+    </link>
+
+    <joint name="${name}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${name}_wheel_link"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="${max_wheel_torque}" velocity="${max_wheel_speed}"/>
+      <dynamics damping="0.05" friction="0.02"/>
+    </joint>
+
+    <!-- Skid-steer contact: high grip rolling direction (mu1 along fdir1 = X),
+         reduced lateral grip (mu2) so the robot can slip sideways when turning in place. -->
+    <gazebo reference="${name}_wheel_link">
+      <mu1>1.0</mu1>
+      <mu2>0.6</mu2>
+      <fdir1>1 0 0</fdir1>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <minDepth>0.001</minDepth>
+      <maxVel>0.1</maxVel>
+      <material>Gazebo/Black</material>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:wheel name="front_left"  x="${ wheel_base/2}" y="${ track_width/2}"/>
+  <xacro:wheel name="front_right" x="${ wheel_base/2}" y="${-track_width/2}"/>
+  <xacro:wheel name="rear_left"   x="${-wheel_base/2}" y="${ track_width/2}"/>
+  <xacro:wheel name="rear_right"  x="${-wheel_base/2}" y="${-track_width/2}"/>
+
+  <!-- Low-friction chassis so it never drags if it touches the ground -->
+  <gazebo reference="base_link">
+    <mu1>0.05</mu1>
+    <mu2>0.05</mu2>
+    <material>Gazebo/Grey</material>
+  </gazebo>
+
+  <!-- ===================== STEREO CAMERA ASSEMBLY ===================== -->
+  <link name="stereo_camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="${cam_bar_depth} ${cam_bar_width} ${cam_bar_height}"/></geometry>
+      <material name="bracket_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="${cam_bar_depth} ${cam_bar_width} ${cam_bar_height}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${camera_mass}"/>
+      <xacro:box_inertia m="${camera_mass}" x="${cam_bar_depth}" y="${cam_bar_width}" z="${cam_bar_height}"/>
+    </inertial>
+  </link>
+
+  <joint name="stereo_camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="stereo_camera_link"/>
+    <origin xyz="${camera_x} 0 ${camera_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Camera body frame (x fwd, y left, z up) + optical frame (z fwd, x right, y down)
+       Optical rotation relative to body frame: rpy = (-pi/2, 0, -pi/2). -->
+  <xacro:macro name="stereo_side" params="side y_sign">
+    <link name="${side}_camera_frame">
+      <!-- Lens barrel (visual only) -->
+      <visual>
+        <origin xyz="${cam_bar_depth/2 + 0.0075} 0 0" rpy="0 ${pi/2} 0"/>
+        <geometry><cylinder radius="0.012" length="0.015"/></geometry>
+        <material name="lens_blue"/>
+      </visual>
+    </link>
+
+    <joint name="${side}_camera_joint" type="fixed">
+      <parent link="stereo_camera_link"/>
+      <child link="${side}_camera_frame"/>
+      <origin xyz="0 ${y_sign * camera_baseline/2} 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${side}_camera_optical_frame"/>
+
+    <joint name="${side}_camera_optical_joint" type="fixed">
+      <parent link="${side}_camera_frame"/>
+      <child link="${side}_camera_optical_frame"/>
+      <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:stereo_side side="left"  y_sign="1"/>
+  <xacro:stereo_side side="right" y_sign="-1"/>
+
+  <!-- Gazebo Classic camera sensors. Sensors look along +X of the camera body frame, which is
+       the optical +Z axis, so the image is published with the optical frame_name. -->
+  <xacro:macro name="stereo_sensor" params="side baseline_hack">
+    <gazebo reference="${side}_camera_frame">
+      <sensor name="stereo_${side}" type="camera">
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <update_rate>${camera_fps}</update_rate>
+        <camera name="${side}">
+          <horizontal_fov>${camera_hfov}</horizontal_fov>
+          <image>
+            <width>${camera_width}</width>
+            <height>${camera_height}</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>50.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+        <plugin name="stereo_${side}_plugin" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>stereo_camera</namespace>
+          </ros>
+          <camera_name>${side}</camera_name>
+          <frame_name>${side}_camera_optical_frame</frame_name>
+          <!-- Right camera_info P[0,3] = -fx * baseline, as expected by stereo_image_proc -->
+          <hack_baseline>${baseline_hack}</hack_baseline>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- Topics: /stereo_camera/left/image_raw, /stereo_camera/left/camera_info,
+               /stereo_camera/right/image_raw, /stereo_camera/right/camera_info -->
+  <xacro:stereo_sensor side="left"  baseline_hack="0.0"/>
+  <xacro:stereo_sensor side="right" baseline_hack="${camera_baseline}"/>
+
+  <!-- ===================== GAZEBO PLUGINS ===================== -->
+  <gazebo>
+    <!-- Four-wheel skid-steer: two wheel pairs driven by one diff-drive plugin.
+         Left joints get the left velocity, right joints get the right velocity.
+         wheel_separation = track width; odometry is encoder based (source 1).
+         Wheel TF is NOT published here (robot_state_publisher does that). -->
+    <plugin name="skid_steer_drive" filename="libgazebo_ros_diff_drive.so">
+      <update_rate>50</update_rate>
+      <num_wheel_pairs>2</num_wheel_pairs>
+
+      <left_joint>front_left_wheel_joint</left_joint>
+      <right_joint>front_right_wheel_joint</right_joint>
+      <left_joint>rear_left_wheel_joint</left_joint>
+      <right_joint>rear_right_wheel_joint</right_joint>
+
+      <wheel_separation>${track_width}</wheel_separation>
+      <wheel_separation>${track_width}</wheel_separation>
+      <wheel_diameter>${2*wheel_radius}</wheel_diameter>
+      <wheel_diameter>${2*wheel_radius}</wheel_diameter>
+
+      <max_wheel_torque>${max_wheel_torque}</max_wheel_torque>
+      <max_wheel_acceleration>4.0</max_wheel_acceleration>
+
+      <command_topic>cmd_vel</command_topic>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>false</publish_wheel_tf>
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <odometry_source>1</odometry_source>
+    </plugin>
+
+    <!-- Publishes /joint_states for the four wheel joints so robot_state_publisher can
+         produce the base_link -> wheel_link transforms. -->
+    <plugin name="wheel_joint_state_publisher" filename="libgazebo_ros_joint_state_publisher.so">
+      <update_rate>50</update_rate>
+      <joint_name>front_left_wheel_joint</joint_name>
+      <joint_name>front_right_wheel_joint</joint_name>
+      <joint_name>rear_left_wheel_joint</joint_name>
+      <joint_name>rear_right_wheel_joint</joint_name>
+    </plugin>
+  </gazebo>
+
+</robot>
