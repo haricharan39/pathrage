@@ -1,121 +1,161 @@
-# PATHRAGE – VisionNav (SIH 2026, PS 26126)
+# PATHRAGE – VisionNav
 
-**Autonomous Navigation in GPS-Denied Outdoor Environments**
+**Autonomous Navigation in GPS-Denied Outdoor Environments** (Smart India Hackathon 2026)
 
-## Step 1: UGV model (URDF/Xacro), teleoperation in Gazebo, visualization in RViz
+An autonomous unmanned ground vehicle (UGV) that navigates using a **single stereo camera**: no GPS, no LiDAR and no IMU. The system is developed and tested in simulation with ROS 2 Humble and Gazebo Classic 11.
 
-The first step of the project builds the simulation foundation that every later stage (stereo depth, visual SLAM, semantic segmentation, Nav2) runs on:
-
-1. Create a realistic URDF/Xacro model of the UGV.
-2. Spawn it in Gazebo Classic and drive it manually (teleoperation).
-3. Visualize the robot, TF tree and stereo camera streams in RViz2.
-
-**Stack:** Ubuntu 22.04 · ROS 2 Humble · Gazebo Classic 11 · RViz2 · URDF/Xacro
+**Environment:** Ubuntu 22.04 · ROS 2 Humble · Gazebo Classic 11 · RViz2
 
 ---
 
-## 1. The robot
+## Contents
 
-A four-wheel-drive skid-steer UGV with one forward-facing stereo camera and no other sensors.
+1. [Approach](#1-approach)
+2. [Progress](#2-progress)
+3. [Repository layout](#3-repository-layout)
+4. [Installation](#4-installation)
+5. [Run the simulation](#5-run-the-simulation)
+6. [Checks](#6-checks)
+7. [ORB-SLAM3 (experimental)](#7-orb-slam3-stereo-experimental)
+8. [Troubleshooting](#8-troubleshooting)
+9. [Known notes and next steps](#9-known-notes-and-next-steps)
 
-| Item | Value (all configurable in the Xacro) |
+---
+
+## 1. Approach
+
+Without GPS the robot has to work out where it is and where it can drive from what it sees. Using the two images of one stereo camera, VisionNav:
+
+1. computes depth (the distance to surfaces),
+2. tracks the robot's motion (visual localization),
+3. builds a map of the surroundings, and
+4. plans and follows a path through that map (next step).
+
+```
+Gazebo stereo cameras ──► stereo_image_proc ──► rectified images, /disparity, /points2
+ (left/right images                                   │
+  + camera_info)                                      ▼
+wheel /odom ───────────────────────────────────► RTAB-Map ──► /map  +  map → odom
+(odom → base_footprint TF)                            │
+                                                      ▼
+                                     RViz (Fixed Frame: map)  ...next: Nav2
+```
+
+### The robot
+
+A four-wheel-drive skid-steer UGV with four actuated wheel joints and exactly one stereo camera assembly (no other sensors).
+
+| Item | Value (configurable in `visionnav.urdf.xacro`) |
 |---|---|
-| Chassis | 0.60 × 0.40 × 0.15 m box, 12 kg |
-| Ground clearance | 0.06 m |
-| Wheels | 4 × cylinders, radius 0.10 m, width 0.06 m, 1.2 kg each |
-| Track width / wheel base | 0.50 m / 0.40 m |
-| Drive | 4 actuated continuous joints, skid-steer via `libgazebo_ros_diff_drive` (2 wheel pairs) |
-| Electronics enclosure | Compact box on the chassis (part of `base_link`) |
-| Sensor bracket | Rigid post plus camera bar |
-| Stereo camera | 2 × Gazebo camera sensors, 0.12 m baseline, 640×480, 80° HFOV, 30 Hz |
-
-Wheel joints: `front_left_wheel_joint`, `front_right_wheel_joint`, `rear_left_wheel_joint`, `rear_right_wheel_joint`.
+| Chassis | 0.60 × 0.40 × 0.15 m, 12 kg, ground clearance 0.06 m |
+| Wheels | radius 0.10 m, width 0.06 m, track 0.50 m, wheel base 0.40 m |
+| Drive | Gazebo diff-drive plugin with two wheel pairs, command topic `/cmd_vel` |
+| Stereo camera | 640×480, 80° horizontal field of view, 30 Hz, baseline 0.12 m (`camera_baseline`) |
 
 ### TF tree
 
 ```
-odom                                  (from the diff-drive plugin)
-└── base_footprint
-    └── base_link
-        ├── front_left_wheel_link
-        ├── front_right_wheel_link
-        ├── rear_left_wheel_link
-        ├── rear_right_wheel_link
-        └── stereo_camera_link
-            ├── left_camera_frame
-            │   └── left_camera_optical_frame
-            └── right_camera_frame
-                └── right_camera_optical_frame
+map → odom → base_footprint → base_link
+                                ├── front_left / front_right / rear_left / rear_right wheel links
+                                └── stereo_camera_link
+                                      ├── left_camera_frame  → left_camera_optical_frame
+                                      └── right_camera_frame → right_camera_optical_frame
 ```
 
-Frames follow REP-103 (x forward, y left, z up). Optical frames use z forward, x right, y down. Each transform has a single publisher: `robot_state_publisher` publishes the fixed and wheel transforms, and the Gazebo plugin publishes `odom → base_footprint`.
+Each transform has one publisher: `robot_state_publisher` (fixed and wheel frames), the Gazebo drive plugin (`odom → base_footprint`) and RTAB-Map (`map → odom`).
 
-### Topics
+### Main topics
 
-| Topic | Type | Purpose |
+| Topic | Purpose |
+|---|---|
+| `/cmd_vel` | drive command (input) |
+| `/odom`, `/joint_states` | wheel odometry and wheel joint states |
+| `/stereo_camera/{left,right}/image_raw`, `.../camera_info` | raw stereo images |
+| `/stereo_camera/{left,right}/image_rect` | rectified images |
+| `/disparity`, `/points2` | stereo depth |
+| `/map`, `/mapData`, `/mapGraph`, `/info` | RTAB-Map outputs |
+
+---
+
+## 2. Progress
+
+| Step | What it does | Status |
 |---|---|---|
-| `/cmd_vel` | `geometry_msgs/Twist` | Drive command (input) |
-| `/odom` | `nav_msgs/Odometry` | Wheel odometry |
-| `/joint_states` | `sensor_msgs/JointState` | Wheel joint states |
-| `/stereo_camera/left/image_raw` | `sensor_msgs/Image` | Left image |
-| `/stereo_camera/left/camera_info` | `sensor_msgs/CameraInfo` | Left calibration |
-| `/stereo_camera/right/image_raw` | `sensor_msgs/Image` | Right image |
-| `/stereo_camera/right/camera_info` | `sensor_msgs/CameraInfo` | Right calibration (includes baseline term) |
+| 1 | UGV model (URDF/Xacro), spawn in Gazebo, teleoperation, RViz view | Done |
+| 2a | Stereo depth: rectified images, disparity, point cloud (`stereo_image_proc`) | Done |
+| 2b | Mapping: RTAB-Map builds the occupancy grid `/map` from stereo and wheel odometry | Done |
+| 2c | Visual localization with ORB-SLAM3 (stereo) | Built; running it on the simulated feed and publishing its pose to ROS are next |
+| 3 | Fuse wheel odometry and visual pose (EKF); connect the `ugv_vision` perception nodes | Pending |
+| 4 | Autonomous navigation with Nav2 on the stereo map | Pending |
 
 ---
 
-## 2. Files for this step
-
-All files live in `src/ugv_description/`:
+## 3. Repository layout
 
 ```
-src/ugv_description/
-├── urdf/visionnav.urdf.xacro      # robot model, Gazebo plugins, stereo camera
-├── launch/display.launch.py       # RViz2 only (robot_state_publisher + joint GUI + RViz2)
-├── launch/gazebo.launch.py        # Gazebo + robot_state_publisher + spawn
-├── worlds/outdoor_offroad.world   # existing world, used as the default
-├── CMakeLists.txt                 # already installs urdf/ launch/ worlds/
-└── package.xml                    # needs joint_state_publisher_gui and rviz2 exec_depends
+pathrage/
+├── src/
+│   ├── ugv_description/          
+│   │   ├── urdf/visionnav.urdf.xacro
+│   │   ├── launch/display.launch.py        
+│   │   ├── launch/gazebo.launch.py         
+│   │   └── worlds/outdoor_offroad.world
+│   ├── ugv_vision/              
+│   │   ├── launch/slam.launch.py           
+│   │   └── config/orbslam3_stereo.yaml     
+│   └── ugv_navigation/           
+├── scripts/setup_orbslam3.sh     
+└── README.md
 ```
-
 ---
 
-## 3. Setup
+## 4. Installation
+
+### 4.1 Clone
+
+```bash
+cd ~
+git clone git@github.com:haricharan39/pathrage.git
+cd ~/pathrage
+```
+
+### 4.2 ROS 2 dependencies
 
 ```bash
 sudo apt update
-sudo apt install -y ros-humble-gazebo-ros-pkgs ros-humble-xacro \
+sudo apt install -y \
+  ros-humble-gazebo-ros-pkgs ros-humble-xacro \
   ros-humble-robot-state-publisher ros-humble-joint-state-publisher-gui \
   ros-humble-rviz2 ros-humble-teleop-twist-keyboard \
   ros-humble-rqt-image-view ros-humble-tf2-tools \
+  ros-humble-stereo-image-proc ros-humble-rtabmap-ros \
   liburdfdom-tools graphviz
 ```
 
-Build:
+### 4.3 Build the ROS 2 packages
 
 ```bash
 source /opt/ros/humble/setup.bash
 cd ~/pathrage
-colcon build --packages-select ugv_description --symlink-install
+colcon build --packages-select ugv_description ugv_vision --symlink-install
 source install/setup.bash
 ```
 
----
+### 4.4 ORB-SLAM3 and its ROS 2 wrapper
 
-## 4. Validate the model
+ORB-SLAM3 and its wrapper are third-party projects and are not stored in this repository. The script builds them outside the repo, in `~/Pangolin`, `~/ORB_SLAM3` and `~/orbslam_ws`:
 
 ```bash
-F=src/ugv_description/urdf/visionnav.urdf.xacro
-xacro $F > /tmp/visionnav.urdf
-check_urdf /tmp/visionnav.urdf                        # root should be base_footprint
-gz sdf -p /tmp/visionnav.urdf > /tmp/visionnav.sdf    # SDF conversion for Gazebo
-grep -c 'type="continuous"' /tmp/visionnav.urdf       # expect 4
-grep -c 'type="camera"' /tmp/visionnav.urdf           # expect 2
+cd ~/pathrage
+bash scripts/setup_orbslam3.sh 2>&1 | tee /tmp/setup_orbslam3.log
+source ~/.bashrc
 ```
+
+It installs the build dependencies, builds Pangolin v0.8 and ORB-SLAM3 (branch `c++14_comp`), adds the library paths to `~/.bashrc`, clones the wrapper `zang09/ORB_SLAM3_ROS2`, applies `third_party/orbslam3_ros2_humble.patch` and builds the wrapper with one compile job at a time.
 
 ---
 
-## 5. Run
+## 5. Run the simulation
 
 Every terminal needs:
 
@@ -124,127 +164,51 @@ source /opt/ros/humble/setup.bash
 source ~/pathrage/install/setup.bash
 ```
 
-### a) Model only in RViz2 (no Gazebo)
+Start the parts in this order.
 
+**Terminal A: Gazebo**
 ```bash
-ros2 launch ugv_description display.launch.py
+ros2 launch ugv_description gazebo.launch.py gui:=false     # remove gui:=false to show the Gazebo window
+```
+**Terminal B: stereo depth**
+```bash
+ros2 launch stereo_image_proc stereo_image_proc.launch.py \
+  left_namespace:=/stereo_camera/left right_namespace:=/stereo_camera/right \
+  approximate_sync:=true use_sim_time:=true
 ```
 
-Opens RViz2 with the robot model and TF, plus a joint GUI to rotate the wheels.
-
-### b) Gazebo simulation
-
-**Terminal A**
-
+**Terminal C: mapping (RTAB-Map)**
 ```bash
-ros2 launch ugv_description gazebo.launch.py
-# options: gui:=false   x:=2.0 y:=1.0 yaw:=1.57   camera_baseline:=0.20
+ros2 launch ~/pathrage/src/ugv_vision/launch/slam.launch.py
 ```
 
-### c) Teleoperate
-
-**Terminal B**
-
+**Terminal D: drive the robot**
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 run teleop_twist_keyboard teleop_twist_keyboard     # i forward, , back, j/l turn, k stop
 ```
+Drive forward slowly for a few metres and turn gradually. RTAB-Map only adds map nodes after the robot has moved, and it needs textured surroundings (rocks, objects) in view.
 
-Keys: `i` forward · `,` back · `j` / `l` rotate left / right · `k` stop.
-
-
-### d) See the live robot in RViz2
-
-With Gazebo running, open RViz2 in another terminal:
-
+**Terminal E: RViz**
 ```bash
-ros2 run rviz2 rviz2 --ros-args -p use_sim_time:=true
-```
-
-In RViz2:
-- Set **Fixed Frame** to `odom` (the robot then moves as you drive).
-- **Add → RobotModel**, with Description Topic `/robot_description`.
-- **Add → TF**.
-- **Add → Image**, with Topic `/stereo_camera/left/image_raw` (and another for `right`).
-
-### e) Camera and TF checks
-
-```bash
-ros2 topic hz /stereo_camera/left/image_raw
-ros2 run rqt_image_view rqt_image_view
-cd /tmp && ros2 run tf2_tools view_frames
-```
-
-### f) Complete test commands (Gazebo running, from a second terminal)
-
-**TF**
-
-```bash
-cd /tmp && ros2 run tf2_tools view_frames                          # writes frames_*.pdf
-ros2 run tf2_ros tf2_echo base_footprint base_link                 # z = 0.10
-ros2 run tf2_ros tf2_echo base_footprint left_camera_optical_frame
-ros2 run tf2_ros tf2_echo left_camera_frame right_camera_frame     # y = -0.12 (baseline)
-ros2 topic info /tf -v | grep -E "Node name|Publisher count"
-ros2 topic info /joint_states -v | grep -E "Node name|Publisher count"
-```
-
-**Stereo camera**
-
-```bash
-ros2 topic list | grep stereo_camera
-ros2 topic hz /stereo_camera/left/image_raw                        # about 30 Hz
-ros2 topic hz /stereo_camera/right/image_raw
-ros2 topic echo /stereo_camera/left/image_raw --once --field header.frame_id
-ros2 topic echo /stereo_camera/right/camera_info --once
-ros2 run rqt_image_view rqt_image_view
-```
-
-**Wheel control**
-
-```bash
-ros2 topic info /cmd_vel
-ros2 topic echo /joint_states --once
-ros2 topic echo /odom --once
-ros2 node list
-```
-
-**Motion checks (read odometry and wheel velocities after each move)**
-
-```bash
-timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.4}}"
-ros2 topic echo /odom --once --field pose.pose.position            # x up by about 1.2 m
-timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: -0.4}}"
-ros2 topic echo /odom --once --field pose.pose.position            # back near 0
-timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.0}}"
-ros2 topic echo /joint_states --once --field velocity              # left/right equal and opposite
-timeout 3 ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.3}, angular: {z: 0.5}}"
-ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "{}"            # stop
-```
-
-**Save outputs to /tmp**
-
-```bash
-ros2 topic list > /tmp/topics.txt
-ros2 topic echo /odom --once > /tmp/odom.txt
-ros2 topic echo /joint_states --once > /tmp/joint_states.txt
-ros2 topic echo /stereo_camera/right/camera_info --once > /tmp/right_camera_info.txt
-```
-
-**Reset / cleanup**
-
-```bash
-ros2 service call /reset_simulation std_srvs/srv/Empty
-pkill -f gzserver; pkill -f gzclient
+rviz2 --ros-args -p use_sim_time:=true
 ```
 
 ---
 
-## 6. Logs
+## 7. ORB-SLAM3 stereo (experimental)
 
+ORB-SLAM3 tracks the camera pose without needing a map. It complements RTAB-Map, which produces the occupancy grid. The wrapper currently shows the pose in its own viewer and does not yet publish a ROS topic.
 
 ```bash
-ros2 launch ugv_description gazebo.launch.py 2>&1 | tee /tmp/gazebo_run.log
-grep -iE "error|warn|fail" /tmp/gazebo_run.log
-ls ~/.ros/log/latest
+source /opt/ros/humble/setup.bash && source ~/orbslam_ws/install/setup.bash
+ros2 run orbslam3 stereo ~/ORB_SLAM3/Vocabulary/ORBvoc.txt \
+  ~/pathrage/src/ugv_vision/config/orbslam3_stereo.yaml false \
+  --ros-args -r camera/left:=/stereo_camera/left/image_raw \
+             -r camera/right:=/stereo_camera/right/image_raw
 ```
 
 ---
+
+## Licenses and third-party software
+
+ORB-SLAM3 is licensed under GPLv3 and is built from its own repository; it is not copied into this repository. RTAB-Map, `stereo_image_proc`, Gazebo and ROS 2 packages are installed from their upstream packages under their own licenses.
