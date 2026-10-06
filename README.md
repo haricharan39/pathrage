@@ -15,10 +15,6 @@ An autonomous unmanned ground vehicle (UGV) that navigates using a **single ster
 3. [Repository layout](#3-repository-layout)
 4. [Installation](#4-installation)
 5. [Run the simulation](#5-run-the-simulation)
-6. [Checks](#6-checks)
-7. [ORB-SLAM3 (experimental)](#7-orb-slam3-stereo-experimental)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Known notes and next steps](#9-known-notes-and-next-steps)
 
 ---
 
@@ -195,19 +191,6 @@ rviz2 --ros-args -p use_sim_time:=true
 
 ---
 
-## 7. ORB-SLAM3 stereo (experimental)
-
-ORB-SLAM3 tracks the camera pose without needing a map. It complements RTAB-Map, which produces the occupancy grid. The wrapper currently shows the pose in its own viewer and does not yet publish a ROS topic.
-
-```bash
-source /opt/ros/humble/setup.bash && source ~/orbslam_ws/install/setup.bash
-ros2 run orbslam3 stereo ~/ORB_SLAM3/Vocabulary/ORBvoc.txt \
-  ~/pathrage/src/ugv_vision/config/orbslam3_stereo.yaml false \
-  --ros-args -r camera/left:=/stereo_camera/left/image_raw \
-             -r camera/right:=/stereo_camera/right/image_raw
-```
-
----
 
 ## Licenses and third-party software
 
