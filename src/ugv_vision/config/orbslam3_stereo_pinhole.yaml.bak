@@ -35,11 +35,11 @@ Stereo.T_c1_c2: !!opencv-matrix
          0.0, 0.0, 1.0, 0.0,
          0.0, 0.0, 0.0, 1.0]
 
-ORBextractor.nFeatures: 2000
+ORBextractor.nFeatures: 1200
 ORBextractor.scaleFactor: 1.2
 ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 10
-ORBextractor.minThFAST: 4
+ORBextractor.iniThFAST: 12
+ORBextractor.minThFAST: 7
 
 Viewer.KeyFrameSize: 0.6
 Viewer.KeyFrameLineWidth: 2.0
