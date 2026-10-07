@@ -1,36 +1,55 @@
-# robot_localization EKF config -- fuses SLAM pose with wheel odometry.
+# robot_localization EKF: fuses wheel odometry, the ORB-SLAM3 pose and the IMU gyro.
 #
-# TODO: tune the *_config boolean matrices and process_noise_covariance once
-# real (or simulated) sensor data is available; the values below are the
-# standard robot_localization starting point, not tuned for this robot.
+# Transform ownership (docs/INTERFACES.md):
+#   odom -> base_footprint : this EKF   (only once Phase 2 turns off Gazebo's odom TF)
+#   map  -> odom           : RTAB-Map
+#
+# publish_tf is FALSE in Phase 0 because Gazebo's diff-drive plugin still publishes
+# odom -> base_footprint, and two publishers of one transform break the TF tree.
+# Phase 2: set publish_tf: true AND set <publish_odom_tf>false in the URDF together.
+#
+# Config matrix order (15 values per input):
+#   x, y, z,  roll, pitch, yaw,  vx, vy, vz,  vroll, vpitch, vyaw,  ax, ay, az
+#
+# Values are the starting point, not yet tuned (Phase 2).
 
 ekf_filter_node:
   ros__parameters:
+    use_sim_time: true
     frequency: 30.0
     two_d_mode: true          # UGV assumed planar; revisit if slopes matter
-    publish_tf: true
+    publish_tf: false         # enable in Phase 2 (see header)
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_link
+    base_link_frame: base_footprint
     world_frame: odom
 
-    odom0: /wheel/odometry
-    odom0_config: [true,  true,  false,
-                   false, false, true,
+    # Wheel odometry from Gazebo diff-drive (/odom): use velocities only, so the same
+    # motion is not counted twice through the position that this EKF itself produces.
+    odom0: /odom
+    odom0_queue_size: 10
+    odom0_config: [false, false, false,
+                   false, false, false,
                    true,  false, false,
                    false, false, true,
                    false, false, false]
 
+    # ORB-SLAM3 pose via ugv_vision/localization_node. Frame/covariance handling and
+    # whether it should be relative are settled in Phase 1.
     pose0: /localization/slam_pose
+    pose0_queue_size: 10
     pose0_config: [true,  true,  false,
                    false, false, true,
                    false, false, false,
                    false, false, false,
                    false, false, false]
 
+    # IMU: angular velocity ONLY. Gazebo's IMU orientation is the simulator's true
+    # orientation (perfect absolute yaw), so orientation must not be fused.
     imu0: /camera/imu
+    imu0_queue_size: 50
     imu0_config: [false, false, false,
-                  true,  true,  true,
+                  false, false, false,
                   false, false, false,
                   true,  true,  true,
-                  true,  true,  false]
+                  false, false, false]

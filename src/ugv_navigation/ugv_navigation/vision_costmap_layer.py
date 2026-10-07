@@ -1,4 +1,8 @@
 """
+NOTE: NOT USED. Costmap integration now goes through Nav2's built-in ObstacleLayer
+fed with the PointCloud2 on /perception/obstacle_points (docs/INTERFACES.md). This
+stub is kept only as a placeholder for an optional C++ layer later.
+
 Custom Nav2 costmap layer plugin that reads the fused vision-based local
 costmap (published by ugv_vision's costmap_fusion_node on
 /perception/local_costmap) instead of a lidar-based costmap source.

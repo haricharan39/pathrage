@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer="Hari Charan",
     maintainer_email="you@example.com",
-    description="Perception (Tier 1 + Tier 2) and stereo-inertial localization for the UGV visual nav project.",
+    description="Perception (Tier 1 + Tier 2) and visual localization glue for the UGV visual nav project.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={

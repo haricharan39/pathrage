@@ -8,8 +8,9 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATCH="$REPO_DIR/third_party/orbslam3_ros2_humble.patch"
 
 if [ ! -f "$PATCH" ]; then
-  echo "ERROR: patch not found: $PATCH" >&2
-  exit 1
+  echo "WARNING: wrapper patch not found: $PATCH" >&2
+  echo "         The wrapper will be built UNPATCHED. See third_party/README.md." >&2
+  PATCH=""
 fi
 
 echo "==> Installing build dependencies"
@@ -52,7 +53,9 @@ if [ ! -d orbslam3_ros2 ]; then
   git clone https://github.com/zang09/ORB_SLAM3_ROS2.git orbslam3_ros2
 fi
 cd orbslam3_ros2
-if git apply --check "$PATCH" 2>/dev/null; then
+if [ -z "$PATCH" ]; then
+  echo "no patch to apply"
+elif git apply --check "$PATCH" 2>/dev/null; then
   git apply "$PATCH"
   echo "patch applied"
 else

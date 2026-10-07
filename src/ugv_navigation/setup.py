@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer="Hari Charan",
     maintainer_email="you@example.com",
-    description="Nav2 integration (custom costmap layer + hierarchical planner config) for the UGV visual nav project.",
+    description="Nav2 integration (A* global planner + MPPI controller config) and the full-stack launch for the UGV visual nav project.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={

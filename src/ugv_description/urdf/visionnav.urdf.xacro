@@ -19,6 +19,7 @@
   The electronics enclosure and the sensor bracket are part of base_link /
   stereo_camera_link geometry (no extra links) so the TF tree stays exactly as specified.
   The IMU is a Gazebo sensor on stereo_camera_link and publishes /camera/imu.
+  A ground-truth odometry plugin publishes /ground_truth/odom (evaluation only).
 
   Control: libgazebo_ros_diff_drive.so with num_wheel_pairs=2 (front pair + rear pair),
   so left wheels and right wheels receive coordinated velocity commands from /cmd_vel.
@@ -386,6 +387,20 @@
       <joint_name>front_right_wheel_joint</joint_name>
       <joint_name>rear_left_wheel_joint</joint_name>
       <joint_name>rear_right_wheel_joint</joint_name>
+    </plugin>
+
+    <!-- Ground truth (EVALUATION ONLY, never fed to the navigation stack).
+         Publishes nav_msgs/Odometry on /ground_truth/odom: pose of base_link in the Gazebo
+         world frame (header.frame_id = world, child_frame_id = base_link), no noise, no TF.
+         Used to measure localization error (ATE) and collisions in the benchmark runs. -->
+    <plugin name="ground_truth_odom" filename="libgazebo_ros_p3d.so">
+      <ros>
+        <namespace>/ground_truth</namespace>
+      </ros>
+      <body_name>base_footprint</body_name>
+      <frame_name>world</frame_name>
+      <update_rate>50.0</update_rate>
+      <gaussian_noise>0.0</gaussian_noise>
     </plugin>
   </gazebo>
 

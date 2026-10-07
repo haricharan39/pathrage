@@ -5,7 +5,7 @@
   <version>0.1.0</version>
   <description>
     Perception (Tier 1 depth-based obstacle detection + Tier 2 learned
-    terrain segmentation) and localization (stereo-inertial SLAM/VIO + EKF
+    terrain segmentation) and localization (ORB-SLAM3 visual localization + EKF
     fusion) for the UGV visual navigation project (SIH PS 26126).
   </description>
   <maintainer email="you@example.com">Hari Charan</maintainer>
@@ -19,6 +19,11 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>robot_localization</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_sensor_msgs</exec_depend>
+  <exec_depend>stereo_image_proc</exec_depend>
+  <exec_depend>rtabmap_slam</exec_depend>
   <!-- ORB-SLAM3 / VINS-Fusion are external, non-rosdep packages
     see docs/ for build instructions, they are not installed via rosdep. -->
 
