@@ -4,7 +4,8 @@
   ROS 2 Humble | Gazebo Classic 11 | REP-103 frames
 
   4WD skid-steer UGV, exactly 4 actuated wheels, exactly 1 stereo camera assembly.
-  No other sensors.
+  Sensors: stereo camera + IMU (the IMU is mounted on the camera bracket, i.e. on
+  stereo_camera_link, so no extra link is added). No other sensors.
 
   TF tree (matches the required hierarchy):
     base_footprint
@@ -17,6 +18,7 @@
 
   The electronics enclosure and the sensor bracket are part of base_link /
   stereo_camera_link geometry (no extra links) so the TF tree stays exactly as specified.
+  The IMU is a Gazebo sensor on stereo_camera_link and publishes /camera/imu.
 
   Control: libgazebo_ros_diff_drive.so with num_wheel_pairs=2 (front pair + rear pair),
   so left wheels and right wheels receive coordinated velocity commands from /cmd_vel.
@@ -309,6 +311,39 @@
                /stereo_camera/right/image_raw, /stereo_camera/right/camera_info -->
   <xacro:stereo_sensor side="left"  baseline_hack="0.0"/>
   <xacro:stereo_sensor side="right" baseline_hack="${camera_baseline}"/>
+
+  <!-- ===================== IMU (mounted on the stereo camera bracket) ===================== -->
+  <!-- Gazebo IMU sensor attached to stereo_camera_link (x fwd, y left, z up); no extra link/joint,
+       so the TF tree is unchanged. Publishes sensor_msgs/Imu on /camera/imu at 200 Hz with
+       gaussian noise (typical consumer-grade values). NOTE: Gazebo's orientation output is the
+       simulator's true orientation (perfect absolute yaw); do not fuse IMU yaw in the EKF. -->
+  <gazebo reference="stereo_camera_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>200</update_rate>
+      <visualize>false</visualize>
+      <imu>
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.0005</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.0005</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.0005</stddev></noise></z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.02</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.02</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.02</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+      <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+        <ros>
+          <namespace>/camera</namespace>
+          <remapping>~/out:=imu</remapping>
+        </ros>
+        <frame_name>stereo_camera_link</frame_name>
+        <initial_orientation_as_reference>false</initial_orientation_as_reference>
+      </plugin>
+    </sensor>
+  </gazebo>
 
   <!-- ===================== GAZEBO PLUGINS ===================== -->
   <gazebo>
