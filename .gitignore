@@ -24,3 +24,4 @@ bags/*
 .vscode/
 *.swp
 .DS_Store
+KeyFrameTrajectory.txt
