@@ -1,0 +1,109 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 16b9d4c..1712b1e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
+ project(orbslam3)
+ 
+ # You should set the PYTHONPATH to your own python site-packages path
+-set(ENV{PYTHONPATH} "/opt/ros/foxy/lib/python3.8/site-packages/")
++set(ENV{PYTHONPATH} "/opt/ros/humble/lib/python3.10/site-packages")
+ 
+ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules)
+ 
+@@ -23,29 +23,19 @@ find_package(message_filters REQUIRED)
+ find_package(Sophus REQUIRED)
+ find_package(Pangolin REQUIRED)
+ find_package(ORB_SLAM3 REQUIRED)
++find_package(OpenCV REQUIRED)
+ 
+ include_directories(
+   include
+   ${ORB_SLAM3_ROOT_DIR}/include
+   ${ORB_SLAM3_ROOT_DIR}/include/CameraModels
++  ${ORB_SLAM3_ROOT_DIR}/Thirdparty/Sophus
+ )
+ 
+ link_directories(
+   include
+ )
+ 
+-add_executable(mono
+-  src/monocular/mono.cpp
+-  src/monocular/monocular-slam-node.cpp
+-)
+-ament_target_dependencies(mono rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin)
+-
+-add_executable(rgbd
+-  src/rgbd/rgbd.cpp
+-  src/rgbd/rgbd-slam-node.cpp
+-)
+-ament_target_dependencies(rgbd rclcpp sensor_msgs cv_bridge message_filters ORB_SLAM3 Pangolin)
+-
+ add_executable(stereo
+   src/stereo/stereo.cpp
+   src/stereo/stereo-slam-node.cpp
+@@ -53,13 +43,9 @@ add_executable(stereo
+ ament_target_dependencies(stereo rclcpp sensor_msgs cv_bridge message_filters
+ ORB_SLAM3 Pangolin)
+ 
+-add_executable(stereo-inertial
+-  src/stereo-inertial/stereo-inertial.cpp
+-  src/stereo-inertial/stereo-inertial-node.cpp
+-)
+-ament_target_dependencies(stereo-inertial rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin)
++target_link_libraries(stereo ${OpenCV_LIBS})
+ 
+-install(TARGETS mono rgbd stereo stereo-inertial
++install(TARGETS stereo
+   DESTINATION lib/${PROJECT_NAME})
+ 
+ # Install launch files.
+diff --git a/CMakeModules/FindORB_SLAM3.cmake b/CMakeModules/FindORB_SLAM3.cmake
+index 6ea6a89..5e8b753 100644
+--- a/CMakeModules/FindORB_SLAM3.cmake
++++ b/CMakeModules/FindORB_SLAM3.cmake
+@@ -5,7 +5,7 @@
+ #
+ # To help the search ORB_SLAM3_ROOT_DIR environment variable as the path to ORB_SLAM3 root folder
+ #  e.g. `set( ORB_SLAM3_ROOT_DIR=~/ORB_SLAM3) `
+-set(ORB_SLAM3_ROOT_DIR "~/Install/ORB_SLAM/ORB_SLAM3")
++set(ORB_SLAM3_ROOT_DIR "/home/hari39/ORB_SLAM3")
+ 
+ # message(${ORB_SLAM3_ROOT_DIR})
+ # message(${ORB_SLAM3_ROOT_DIR}/include)
+diff --git a/src/stereo/stereo-slam-node.cpp b/src/stereo/stereo-slam-node.cpp
+index d2917f9..cf41962 100644
+--- a/src/stereo/stereo-slam-node.cpp
++++ b/src/stereo/stereo-slam-node.cpp
+@@ -48,8 +48,8 @@ StereoSlamNode::StereoSlamNode(ORB_SLAM3::System* pSLAM, const string &strSettin
+         cv::initUndistortRectifyMap(K_r,D_r,R_r,P_r.rowRange(0,3).colRange(0,3),cv::Size(cols_r,rows_r),CV_32F,M1r,M2r);
+     }
+ 
+-    left_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(shared_ptr<rclcpp::Node>(this), "camera/left");
+-    right_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(shared_ptr<rclcpp::Node>(this), "camera/right");
++    left_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(this, "camera/left");
++    right_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(this, "camera/right");
+ 
+     syncApproximate = std::make_shared<message_filters::Synchronizer<approximate_sync_policy> >(approximate_sync_policy(10), *left_sub, *right_sub);
+     syncApproximate->registerCallback(&StereoSlamNode::GrabStereo, this);
+@@ -97,5 +97,6 @@ void StereoSlamNode::GrabStereo(const ImageMsg::SharedPtr msgLeft, const ImageMs
+     else
+     {
+         m_SLAM->TrackStereo(cv_ptrLeft->image, cv_ptrRight->image, Utility::StampToSec(msgLeft->header.stamp));
++        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "frames arriving: state=%d keypoints=%zu", m_SLAM->GetTrackingState(), m_SLAM->GetTrackedKeyPointsUn().size());
+     }
+ }
+diff --git a/src/stereo/stereo.cpp b/src/stereo/stereo.cpp
+index 1b0eb09..32a7301 100644
+--- a/src/stereo/stereo.cpp
++++ b/src/stereo/stereo.cpp
+@@ -21,7 +21,7 @@ int main(int argc, char **argv)
+     // malloc error using new.. try shared ptr
+     // Create SLAM system. It initializes all system threads and gets ready to process frames.
+ 
+-    bool visualization = true;
++    bool visualization = (argc > 4 && std::string(argv[4]) == "true");
+     ORB_SLAM3::System pSLAM(argv[1], argv[2], ORB_SLAM3::System::STEREO, visualization);
+ 
+     auto node = std::make_shared<StereoSlamNode>(&pSLAM, argv[2], argv[3]);
