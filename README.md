@@ -87,7 +87,7 @@ Each transform has one publisher: `robot_state_publisher` (fixed and wheel frame
 | 3 | Fuse wheel odometry and visual pose (EKF); connect the `ugv_vision` perception nodes | Pending (interfaces and EKF config fixed, logic not written) |
 | 4 | Autonomous navigation with Nav2 on the stereo map | Pending (Nav2 parameters are a stub) |
 
-A detailed phase-by-phase plan is kept outside the repo; interface contracts are in [`docs/INTERFACES.md`](docs/INTERFACES.md). The simulated IMU and ground-truth odometry are in the robot model; the `ugv_vision` nodes, EKF config, and `full_stack.launch.py` now follow the topic and frame names in that file.
+The phase-by-phase plan is in [`docs/PLAN.md`](docs/PLAN.md); interface contracts are in [`docs/INTERFACES.md`](docs/INTERFACES.md). The simulated IMU and ground-truth odometry are in the robot model; the `ugv_vision` nodes, EKF config, and `full_stack.launch.py` now follow the topic and frame names in that file.
 
 ---
 
@@ -103,7 +103,7 @@ pathrage/
 │   │   └── worlds/outdoor_offroad.world
 │   ├── ugv_vision/              
 │   │   ├── launch/slam.launch.py           
-│   │   └── config/orbslam3_stereo.yaml     
+│   │   └── config/orbslam3_stereo_pinhole.yaml
 │   └── ugv_navigation/           
 ├── scripts/setup_orbslam3.sh     
 └── README.md

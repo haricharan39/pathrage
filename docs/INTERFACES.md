@@ -92,8 +92,10 @@ used only by evaluation scripts.
 
 | Item | Value | Where it matters |
 |---|---|---|
-| Stereo baseline / focal length | 0.12 m / 381.36 px (80 deg HFOV, 640x480) | ORB-SLAM3 yaml, depth accuracy |
+| Stereo baseline / focal length | 0.12 m / 381.347 px (URDF camera_hfov 1.3963 rad, 640x480; cx 320.5, cy 240.5) | ORB-SLAM3 yaml, depth accuracy |
 | Trusted stereo range | about 0.8-6 m (error ~0.27 m at 5 m, ~0.70 m at 8 m for 0.5 px disparity error) | Tier 1 `min_range`/`max_range`, RTAB-Map `Grid/RangeMax` |
+| Measured rates (Phase 0, 2026-10-11, sim + RTAB-Map running) | `/camera/imu` ~197 Hz; `/points2` ~8-9 Hz (camera is 30 Hz, `stereo_image_proc` on CPU is the bottleneck); `map`->`odom` ~10 Hz; `odom`->`base_footprint` ~50 Hz | Tier 1 can run no faster than `/points2` |
+| `/tf` publishers (verified) | `skid_steer_drive` (`odom`->`base_footprint`), `robot_state_publisher`, `rtabmap` (`map`->`odom`) | one owner per transform |
 | Robot footprint | 0.60 x 0.40 m | Nav2 footprint and inflation |
 | Wheel radius / track / wheel base | 0.10 / 0.50 / 0.40 m | odometry, controller limits |
 
