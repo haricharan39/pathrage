@@ -1,4 +1,15 @@
 %YAML:1.0
+# ORB-SLAM3 stereo settings for the simulated camera. This is the ONLY ORB-SLAM3 yaml.
+# Inputs: /stereo_camera/{left,right}/image_rect (already rectified by stereo_image_proc,
+# so no distortion and no rectification inside ORB-SLAM3: the wrapper runs with rectify=false).
+# Numbers come from the URDF: hfov 1.3963 rad, 640x480 -> fx = fy = 320 / tan(1.3963 / 2)
+# = 381.347; cx = 320.5, cy = 240.5; baseline 0.12 m; 30 Hz.
+# Check them against the live camera_info before trusting a run:
+#   ros2 topic echo --once /stereo_camera/left/camera_info   (K[0], K[2], K[5])
+#   ros2 topic echo --once /stereo_camera/right/camera_info  (P[3] = -fx * baseline = -45.76)
+# Stereo.T_c1_c2 = pose of the right camera in the left camera frame: +0.12 m along x
+# (the right camera is to the right in the optical frame). ORB-SLAM3 only uses its norm
+# as the baseline in this build (Settings.cc), but the sign is kept physically correct.
 File.version: "1.0"
 Camera.type: "PinHole"
 
@@ -23,14 +34,14 @@ Camera2.p2: 0.0
 Camera.width: 640
 Camera.height: 480
 Camera.fps: 30
-Camera.RGB: 1
+Camera.RGB: 1            # irrelevant for the mono8 rectified images
 
 Stereo.ThDepth: 40.0
 Stereo.T_c1_c2: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [1.0, 0.0, 0.0, -0.12,
+  data: [1.0, 0.0, 0.0, 0.12,
          0.0, 1.0, 0.0, 0.0,
          0.0, 0.0, 1.0, 0.0,
          0.0, 0.0, 0.0, 1.0]

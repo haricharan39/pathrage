@@ -53,13 +53,27 @@ if [ ! -d orbslam3_ros2 ]; then
   git clone https://github.com/zang09/ORB_SLAM3_ROS2.git orbslam3_ros2
 fi
 cd orbslam3_ros2
+# The patch is generated against this upstream commit (see third_party/README.md).
+WRAPPER_COMMIT=00c5433
+if [ -z "$(git status --porcelain)" ]; then
+  git checkout -q "$WRAPPER_COMMIT" || echo "WARNING: could not check out $WRAPPER_COMMIT; using the current commit"
+fi
 if [ -z "$PATCH" ]; then
   echo "no patch to apply"
 elif git apply --check "$PATCH" 2>/dev/null; then
   git apply "$PATCH"
   echo "patch applied"
+elif git apply --reverse --check "$PATCH" 2>/dev/null; then
+  echo "patch already applied"
 else
-  echo "patch not applied (already applied, or the wrapper changed upstream)"
+  echo "ERROR: patch does not apply to this wrapper checkout (changed upstream, or an older" >&2
+  echo "       version of the patch is applied: run 'git checkout .' in the wrapper dir)." >&2
+  exit 1
+fi
+# Phase 1: the wrapper must publish the pose, otherwise ORB-SLAM3 is useless for this project.
+if [ -n "$PATCH" ] && ! grep -q "orb_slam3/pose" src/stereo/stereo-slam-node.cpp; then
+  echo "ERROR: src/stereo/stereo-slam-node.cpp has no /orb_slam3/pose publisher after patching." >&2
+  exit 1
 fi
 sed -i "s#^set(ORB_SLAM3_ROOT_DIR .*#set(ORB_SLAM3_ROOT_DIR \"$HOME/ORB_SLAM3\")#" CMakeModules/FindORB_SLAM3.cmake
 
@@ -75,3 +89,4 @@ echo
 echo "Done. Verify with:"
 echo "  source ~/.bashrc && source /opt/ros/humble/setup.bash && source ~/orbslam_ws/install/setup.bash"
 echo "  ros2 pkg executables orbslam3     # expect: orbslam3 stereo"
+echo "Then run the stack:  ros2 launch ugv_navigation full_stack.launch.py orbslam:=true world:=offroad_sparse"

@@ -8,6 +8,11 @@ Interface (see docs/INTERFACES.md, section "3D viewer"):
         /perception/tier1_obstacles   sensor_msgs/PointCloud2   Tier-1 obstacles (Phase 3), drawn as red overlay
         /plan                         nav_msgs/Path             Nav2 global plan (Phase 4), optional
         /goal_pose                    geometry_msgs/PoseStamped current goal, optional
+        /localization/slam_pose       PoseWithCovarianceStamped ORB-SLAM3 pose (Phase 1), cyan trajectory
+        /ground_truth/odom            nav_msgs/Odometry         ground truth, green trajectory (display
+                                                                only, rigidly aligned to the fixed frame
+                                                                at the first sample)
+        /orb_slam3/tracking_ok        std_msgs/Bool             tracking OK / LOST indicator
         TF                            <fixed_frame> <- cloud frame / base_footprint
     Publishes:
         /goal_pose                    geometry_msgs/PoseStamped only when you double-click the ground
@@ -25,13 +30,14 @@ import webbrowser
 import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from nav_msgs.msg import Odometry, Path
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformListener
 
 from . import viewer_core as vc
@@ -52,6 +58,10 @@ class ViewerNode(Node):
         p("tier1_topic", "/perception/tier1_obstacles")
         p("plan_topic", "/plan")
         p("goal_topic", "/goal_pose")
+        p("slam_topic", "/localization/slam_pose")
+        p("gt_topic", "/ground_truth/odom")
+        p("tracking_ok_topic", "/orb_slam3/tracking_ok")
+        p("pose_timeout", 1.0)              # s without a SLAM pose before the HUD says "no pose"
         p("voxel_size", 0.05)
         p("max_points", 1_500_000)
         p("min_range", 0.8)                 # trusted stereo range, docs/INTERFACES.md section 3
@@ -85,7 +95,14 @@ class ViewerNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.traj = []              # list of [x, y, z]
+        self.traj = []              # driven path (TF base pose), list of [x, y, z]
+        self.slam_traj = []         # /localization/slam_pose in the fixed frame
+        self.gt_traj = []           # /ground_truth/odom aligned into the fixed frame
+        self.pose_timeout = float(g("pose_timeout"))
+        self._gt_align = None       # 4x4 world -> fixed, set from the first ground-truth sample
+        self._last_slam = None      # (monotonic time, stamp_s, xyz)
+        self._last_gt = None        # (stamp_s, xyz)
+        self._tracking_ok = None    # None until /orb_slam3/tracking_ok is ever received
         self._last_plan = None      # cached JSON strings for new clients
         self._last_goal = None
         self._cmds = queue.SimpleQueue()
@@ -117,6 +134,9 @@ class ViewerNode(Node):
         self.create_subscription(PointCloud2, g("tier1_topic"), self._on_tier1, 5)
         self.create_subscription(Path, g("plan_topic"), self._on_plan, 5)
         self.create_subscription(PoseStamped, g("goal_topic"), self._on_goal, 5)
+        self.create_subscription(PoseWithCovarianceStamped, g("slam_topic"), self._on_slam, 10)
+        self.create_subscription(Odometry, g("gt_topic"), self._on_gt, qos_profile_sensor_data)
+        self.create_subscription(Bool, g("tracking_ok_topic"), self._on_tracking_ok, 10)
         self.goal_pub = self.create_publisher(PoseStamped, g("goal_topic"), 5)
         self.create_timer(1.0 / max(1.0, float(g("publish_hz"))), self._on_timer)
 
@@ -241,6 +261,62 @@ class ViewerNode(Node):
         self._last_goal = json.dumps({"type": "goal", "pos": np.round(pt, 3).tolist()})
         self.server.broadcast_reliable(self._last_goal)
 
+    def _add_track(self, which, store, xyz):
+        """Append to a trajectory if the robot moved `traj_min_step`; broadcast the new point."""
+        pt = [round(float(v), 3) for v in xyz]
+        if store and math.dist(store[-1], pt) < self.traj_step:
+            return
+        store.append(pt)
+        self.server.broadcast_reliable(json.dumps({"type": "traj_add", "which": which, "pts": [pt]}))
+
+    def _on_slam(self, msg):
+        tf = self._lookup(msg.header.frame_id, Time())
+        if tf is None:
+            return
+        p = msg.pose.pose.position
+        pt = vc.transform_points(np.array([[p.x, p.y, p.z]], np.float32), *tf)[0]
+        stamp = Time.from_msg(msg.header.stamp).nanoseconds * 1e-9
+        self._last_slam = (time.monotonic(), stamp, pt.astype(float))
+        self._add_track("slam", self.slam_traj, pt)
+
+    def _on_gt(self, msg):
+        p, o = msg.pose.pose.position, msg.pose.pose.orientation
+        t_world_base = vc.pose_to_matrix([p.x, p.y, p.z], [o.x, o.y, o.z, o.w])
+        if self._gt_align is None:
+            try:
+                t = self.tf_buffer.lookup_transform(self.fixed, self.base, Time())
+            except Exception:
+                return
+            tr, q = t.transform.translation, t.transform.rotation
+            self._gt_align = vc.align_transform(
+                vc.pose_to_matrix([tr.x, tr.y, tr.z], [q.x, q.y, q.z, q.w]), t_world_base)
+            self.get_logger().info("ground truth aligned to the fixed frame at the first sample")
+        pt = vc.apply_matrix(self._gt_align, [p.x, p.y, p.z])[0]
+        self._last_gt = (Time.from_msg(msg.header.stamp).nanoseconds * 1e-9, pt)
+        self._add_track("gt", self.gt_traj, pt)
+
+    def _on_tracking_ok(self, msg):
+        self._tracking_ok = bool(msg.data)
+
+    def _loc_status(self):
+        """Dict for the HUD: tracking state, SLAM pose age and the live position error."""
+        age = None
+        if self._last_slam is not None:
+            age = time.monotonic() - self._last_slam[0]
+        if self._tracking_ok is None and self._last_slam is None:
+            state = "off"                      # ORB-SLAM3 not running
+        elif self._last_slam is None:
+            state = "init"                     # running, no pose yet
+        elif self._tracking_ok is False or age > self.pose_timeout:
+            state = "lost"
+        else:
+            state = "ok"
+        err = None
+        if state == "ok" and self._last_gt is not None:
+            if abs(self._last_slam[1] - self._last_gt[0]) < 0.2:
+                err = float(np.linalg.norm(self._last_slam[2][:2] - self._last_gt[1][:2]))
+        return {"state": state, "err": None if err is None else round(err, 3)}
+
     # ------------------------------------------------------------------ periodic work
     def _on_timer(self):
         self._drain_commands()
@@ -263,13 +339,13 @@ class ViewerNode(Node):
                  "proc_ms": round(self._proc_ms, 1), "rate": round(self._rate, 1),
                  "clients": self.server.client_count, "tf_ok": tf is not None and self._tf_ok,
                  "fixed_frame": self.fixed}
-        state = {"type": "state", "stats": stats}
+        state = {"type": "state", "stats": stats, "loc": self._loc_status()}
         if tf is not None:
             state["pose"] = [round(v, 4) for v in tf[0] + tf[1]]
             last = self.traj[-1] if self.traj else None
             if last is None or math.dist(last, tf[0]) >= self.traj_step:
                 self.traj.append([round(v, 3) for v in tf[0]])
-                self.server.broadcast_reliable(json.dumps({"type": "traj_add",
+                self.server.broadcast_reliable(json.dumps({"type": "traj_add", "which": "driven",
                                                            "pts": [self.traj[-1]]}))
         self.server.broadcast_latest("state", json.dumps(state))
 
@@ -286,6 +362,9 @@ class ViewerNode(Node):
                 self.server.broadcast_reliable(json.dumps({"type": "cleared", "what": "map"}))
             elif name == "clear_traj":
                 self.traj.clear()
+                self.slam_traj.clear()
+                self.gt_traj.clear()
+                self._gt_align = None           # re-align on the next ground-truth sample
                 self.server.broadcast_reliable(json.dumps({"type": "cleared", "what": "traj"}))
             elif name == "goal":
                 self._publish_goal(float(cmd["x"]), float(cmd["y"]))
@@ -310,7 +389,8 @@ class ViewerNode(Node):
         frames = [json.dumps({"type": "hello", "max_points": self.map.max_points,
                               "voxel": self.map.voxel, "fixed_frame": self.fixed})]
         frames += list(self.map.snapshot_chunks())
-        frames.append(json.dumps({"type": "traj_set", "pts": list(self.traj)}))
+        for which, store in (("driven", self.traj), ("slam", self.slam_traj), ("gt", self.gt_traj)):
+            frames.append(json.dumps({"type": "traj_set", "which": which, "pts": list(store)}))
         for cached in (self._last_plan, self._last_goal):
             if cached:
                 frames.append(cached)

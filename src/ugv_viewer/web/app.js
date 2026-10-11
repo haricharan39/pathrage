@@ -205,30 +205,32 @@ const frustum = (() => {
   return l;
 })();
 
-// ---------------------------------------------------------------- trajectory, plan, goal
-const trajPos = new Float32Array(TRAJ_CAP * 3);
-const trajGeo = new THREE.BufferGeometry();
-trajGeo.setAttribute('position', new THREE.BufferAttribute(trajPos, 3).setUsage(THREE.DynamicDrawUsage));
-trajGeo.setDrawRange(0, 0);
-const trajLine = new THREE.Line(trajGeo, new THREE.LineBasicMaterial({ color: 0xffd23e }));
-trajLine.frustumCulled = false;
-scene.add(trajLine);
-let nTraj = 0;
-
-function trajReset(pts) {
-  nTraj = 0;
-  for (const p of pts) trajAdd(p);
+// ---------------------------------------------------------------- trajectories, plan, goal
+// Three polylines: driven path (TF base pose, yellow), ORB-SLAM3 (cyan), ground truth (green).
+function makeTrack(color) {
+  const pos = new Float32Array(TRAJ_CAP * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setDrawRange(0, 0);
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
+  line.frustumCulled = false;
+  scene.add(line);
+  const track = { pos, geo, line, n: 0 };
+  track.add = (p) => {
+    if (track.n >= TRAJ_CAP) {                   // drop the oldest half
+      pos.copyWithin(0, (TRAJ_CAP / 2) * 3);
+      track.n = TRAJ_CAP / 2;
+    }
+    pos.set(p, track.n * 3);
+    track.n++;
+    geo.setDrawRange(0, track.n);
+    geo.attributes.position.needsUpdate = true;
+  };
+  track.reset = (pts) => { track.n = 0; geo.setDrawRange(0, 0); for (const p of pts) track.add(p); };
+  return track;
 }
-function trajAdd(p) {
-  if (nTraj >= TRAJ_CAP) {                       // drop the oldest half
-    trajPos.copyWithin(0, (TRAJ_CAP / 2) * 3);
-    nTraj = TRAJ_CAP / 2;
-  }
-  trajPos.set(p, nTraj * 3);
-  nTraj++;
-  trajGeo.setDrawRange(0, nTraj);
-  trajGeo.attributes.position.needsUpdate = true;
-}
+const tracks = { driven: makeTrack(0xffd23e), slam: makeTrack(0x00f0ff), gt: makeTrack(0x39ff6a) };
+const trackOf = (m) => tracks[m.which || 'driven'] || tracks.driven;
 
 const planPos = new Float32Array(PLAN_CAP * 3);
 const planGeo = new THREE.BufferGeometry();
@@ -250,7 +252,7 @@ let goalSet = false;
 scene.add(goal);
 
 // ---------------------------------------------------------------- websocket
-const state = { pose: null, stats: null };
+const state = { pose: null, stats: null, loc: null };
 let voxel = 0.05;
 function updateScale() {
   // pixels covered by one voxel at 1 m distance
@@ -280,19 +282,19 @@ function connect() {
       case 'hello':
         if (m.max_points !== mapCap) allocMap(m.max_points);
         else { nMap = 0; mapGeo.setDrawRange(0, 0); dirty = { lo: Infinity, hi: -1 }; }
-        trajReset([]);
+        for (const t of Object.values(tracks)) t.reset([]);
         voxel = m.voxel || voxel;
         updateScale();
         break;
       case 'state':
-        state.pose = m.pose || state.pose; state.stats = m.stats;
+        state.pose = m.pose || state.pose; state.stats = m.stats; state.loc = m.loc || null;
         if (m.pose) {
           robot.position.set(m.pose[0], m.pose[1], m.pose[2]);
           robot.quaternion.set(m.pose[3], m.pose[4], m.pose[5], m.pose[6]);
         }
         break;
-      case 'traj_set': trajReset(m.pts); break;
-      case 'traj_add': for (const p of m.pts) trajAdd(p); break;
+      case 'traj_set': trackOf(m).reset(m.pts); break;
+      case 'traj_add': for (const p of m.pts) trackOf(m).add(p); break;
       case 'plan': {
         const n = Math.min(m.pts.length, PLAN_CAP);
         for (let i = 0; i < n; i++) planPos.set(m.pts[i], i * 3);
@@ -302,7 +304,7 @@ function connect() {
       case 'goal': goal.position.set(...m.pos); goalSet = true; goal.visible = $('lPlan').checked; break;
       case 'cleared':
         if (m.what === 'map') { nMap = 0; mapGeo.setDrawRange(0, 0); dirty = { lo: Infinity, hi: -1 }; }
-        if (m.what === 'traj') { nTraj = 0; trajGeo.setDrawRange(0, 0); }
+        if (m.what === 'traj') for (const t of Object.values(tracks)) t.reset([]);
         break;
     }
   };
@@ -325,7 +327,9 @@ bind('size', (e) => {
 bind('lMap', (e) => { mapPoints.visible = e.checked; });
 bind('lLive', (e) => { livePoints.visible = e.checked; });
 bind('lTier1', (e) => { tier1.visible = e.checked; });
-bind('lTraj', (e) => { trajLine.visible = e.checked; });
+bind('lTraj', (e) => { tracks.driven.line.visible = e.checked; });
+bind('lSlam', (e) => { tracks.slam.line.visible = e.checked; });
+bind('lGt', (e) => { tracks.gt.line.visible = e.checked; });
 bind('lPlan', (e) => { planLine.visible = e.checked; goal.visible = e.checked && goalSet; });
 bind('lRobot', (e) => { robot.visible = e.checked; });
 bind('lFrustum', (e) => { frustum.visible = e.checked; });
@@ -382,6 +386,11 @@ function updateHud() {
   $('dotTf').classList.toggle('on', s.tf_ok);
   $('vTf').textContent = s.tf_ok ? 'ok' : 'waiting';
   if (state.pose) $('vPose').textContent = `${state.pose[0].toFixed(2)}, ${state.pose[1].toFixed(2)}`;
+  const loc = state.loc || { state: 'off', err: null };
+  const label = { off: 'not running', init: 'initialising', ok: 'tracking OK', lost: 'LOST' }[loc.state] || loc.state;
+  $('vSlam').textContent = label;
+  $('dotSlam').classList.toggle('on', loc.state === 'ok');
+  $('vErr').textContent = loc.err == null ? '-' : `${loc.err.toFixed(2)} m`;
   const warn = $('warn');
   let msg = '';
   if (!s.tf_ok) msg = `No TF to '${s.fixed_frame}' yet. Is the simulation running?`;

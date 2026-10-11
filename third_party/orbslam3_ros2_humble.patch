@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 16b9d4c..1712b1e 100644
+index 16b9d4c..f8b4419 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
@@ -11,7 +11,14 @@ index 16b9d4c..1712b1e 100644
  
  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules)
  
-@@ -23,29 +23,19 @@ find_package(message_filters REQUIRED)
+@@ -18,48 +18,36 @@ endif()
+ find_package(ament_cmake REQUIRED)
+ find_package(rclcpp REQUIRED)
+ find_package(sensor_msgs REQUIRED)
++find_package(geometry_msgs REQUIRED)
++find_package(std_msgs REQUIRED)
+ find_package(cv_bridge REQUIRED)
+ find_package(message_filters REQUIRED)
  find_package(Sophus REQUIRED)
  find_package(Pangolin REQUIRED)
  find_package(ORB_SLAM3 REQUIRED)
@@ -43,8 +50,9 @@ index 16b9d4c..1712b1e 100644
  add_executable(stereo
    src/stereo/stereo.cpp
    src/stereo/stereo-slam-node.cpp
-@@ -53,13 +43,9 @@ add_executable(stereo
- ament_target_dependencies(stereo rclcpp sensor_msgs cv_bridge message_filters
+ )
+-ament_target_dependencies(stereo rclcpp sensor_msgs cv_bridge message_filters
++ament_target_dependencies(stereo rclcpp sensor_msgs geometry_msgs std_msgs cv_bridge message_filters
  ORB_SLAM3 Pangolin)
  
 -add_executable(stereo-inertial
@@ -59,41 +67,128 @@ index 16b9d4c..1712b1e 100644
    DESTINATION lib/${PROJECT_NAME})
  
  # Install launch files.
-diff --git a/CMakeModules/FindORB_SLAM3.cmake b/CMakeModules/FindORB_SLAM3.cmake
-index 6ea6a89..5e8b753 100644
---- a/CMakeModules/FindORB_SLAM3.cmake
-+++ b/CMakeModules/FindORB_SLAM3.cmake
-@@ -5,7 +5,7 @@
- #
- # To help the search ORB_SLAM3_ROOT_DIR environment variable as the path to ORB_SLAM3 root folder
- #  e.g. `set( ORB_SLAM3_ROOT_DIR=~/ORB_SLAM3) `
--set(ORB_SLAM3_ROOT_DIR "~/Install/ORB_SLAM/ORB_SLAM3")
-+set(ORB_SLAM3_ROOT_DIR "/home/hari39/ORB_SLAM3")
+diff --git a/package.xml b/package.xml
+index f0c890b..83abd6c 100644
+--- a/package.xml
++++ b/package.xml
+@@ -12,6 +12,8 @@
  
- # message(${ORB_SLAM3_ROOT_DIR})
- # message(${ORB_SLAM3_ROOT_DIR}/include)
+   <depend>rclcpp</depend>
+   <depend>sensor_msgs</depend>
++  <depend>geometry_msgs</depend>
++  <depend>std_msgs</depend>
+   <depend>cv_bridge</depend>
+   <depend>message_filters</depend>
+   <depend>Pangolin</depend>
 diff --git a/src/stereo/stereo-slam-node.cpp b/src/stereo/stereo-slam-node.cpp
-index d2917f9..cf41962 100644
+index d2917f9..5d09ab2 100644
 --- a/src/stereo/stereo-slam-node.cpp
 +++ b/src/stereo/stereo-slam-node.cpp
-@@ -48,8 +48,8 @@ StereoSlamNode::StereoSlamNode(ORB_SLAM3::System* pSLAM, const string &strSettin
+@@ -48,8 +48,12 @@ StereoSlamNode::StereoSlamNode(ORB_SLAM3::System* pSLAM, const string &strSettin
          cv::initUndistortRectifyMap(K_r,D_r,R_r,P_r.rowRange(0,3).colRange(0,3),cv::Size(cols_r,rows_r),CV_32F,M1r,M2r);
      }
  
 -    left_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(shared_ptr<rclcpp::Node>(this), "camera/left");
 -    right_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(shared_ptr<rclcpp::Node>(this), "camera/right");
++    pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("orb_slam3/pose", 10);
++    ok_pub = this->create_publisher<std_msgs::msg::Bool>("orb_slam3/tracking_ok", 10);
++    state_pub = this->create_publisher<std_msgs::msg::Int32>("orb_slam3/tracking_state", 10);
++
 +    left_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(this, "camera/left");
 +    right_sub = std::make_shared<message_filters::Subscriber<ImageMsg> >(this, "camera/right");
  
      syncApproximate = std::make_shared<message_filters::Synchronizer<approximate_sync_policy> >(approximate_sync_policy(10), *left_sub, *right_sub);
      syncApproximate->registerCallback(&StereoSlamNode::GrabStereo, this);
-@@ -97,5 +97,6 @@ void StereoSlamNode::GrabStereo(const ImageMsg::SharedPtr msgLeft, const ImageMs
+@@ -92,10 +96,52 @@ void StereoSlamNode::GrabStereo(const ImageMsg::SharedPtr msgLeft, const ImageMs
+         cv::Mat imLeft, imRight;
+         cv::remap(cv_ptrLeft->image,imLeft,M1l,M2l,cv::INTER_LINEAR);
+         cv::remap(cv_ptrRight->image,imRight,M1r,M2r,cv::INTER_LINEAR);
+-        m_SLAM->TrackStereo(imLeft, imRight, Utility::StampToSec(msgLeft->header.stamp));
++        Sophus::SE3f Tcw = m_SLAM->TrackStereo(imLeft, imRight, Utility::StampToSec(msgLeft->header.stamp));
++        PublishPose(Tcw, msgLeft->header.stamp);
+     }
      else
      {
-         m_SLAM->TrackStereo(cv_ptrLeft->image, cv_ptrRight->image, Utility::StampToSec(msgLeft->header.stamp));
-+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "frames arriving: state=%d keypoints=%zu", m_SLAM->GetTrackingState(), m_SLAM->GetTrackedKeyPointsUn().size());
+-        m_SLAM->TrackStereo(cv_ptrLeft->image, cv_ptrRight->image, Utility::StampToSec(msgLeft->header.stamp));
++        Sophus::SE3f Tcw = m_SLAM->TrackStereo(cv_ptrLeft->image, cv_ptrRight->image, Utility::StampToSec(msgLeft->header.stamp));
++        PublishPose(Tcw, msgLeft->header.stamp);
      }
  }
++
++void StereoSlamNode::PublishPose(const Sophus::SE3f &Tcw, const builtin_interfaces::msg::Time &stamp)
++{
++    const int state = m_SLAM->GetTrackingState();
++    const bool ok = (state == 2);   // ORB_SLAM3::Tracking::OK
++
++    std_msgs::msg::Int32 state_msg;
++    state_msg.data = state;
++    state_pub->publish(state_msg);
++
++    std_msgs::msg::Bool ok_msg;
++    ok_msg.data = ok;
++    ok_pub->publish(ok_msg);
++
++    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
++                         "tracking state=%d keypoints=%zu", state, m_SLAM->GetTrackedKeyPointsUn().size());
++
++    // No pose while tracking is not OK: Tcw is stale or the identity then.
++    if (!ok)
++        return;
++
++    // ORB-SLAM3 returns Tcw (world -> camera). Publish its inverse Twc (camera in the world).
++    const Sophus::SE3f Twc = Tcw.inverse();
++    const Eigen::Vector3f t = Twc.translation();
++    const Eigen::Quaternionf q = Twc.unit_quaternion();
++    if (!t.allFinite() || !q.coeffs().allFinite())
++        return;
++
++    geometry_msgs::msg::PoseStamped msg;
++    msg.header.stamp = stamp;            // same stamp as the image pair
++    msg.header.frame_id = "orb_map";
++    msg.pose.position.x = t.x();
++    msg.pose.position.y = t.y();
++    msg.pose.position.z = t.z();
++    msg.pose.orientation.x = q.x();
++    msg.pose.orientation.y = q.y();
++    msg.pose.orientation.z = q.z();
++    msg.pose.orientation.w = q.w();
++    pose_pub->publish(msg);
++}
+diff --git a/src/stereo/stereo-slam-node.hpp b/src/stereo/stereo-slam-node.hpp
+index 3cd07e3..3df5843 100644
+--- a/src/stereo/stereo-slam-node.hpp
++++ b/src/stereo/stereo-slam-node.hpp
+@@ -3,6 +3,9 @@
+ 
+ #include "rclcpp/rclcpp.hpp"
+ #include "sensor_msgs/msg/image.hpp"
++#include "geometry_msgs/msg/pose_stamped.hpp"
++#include "std_msgs/msg/bool.hpp"
++#include "std_msgs/msg/int32.hpp"
+ 
+ #include "message_filters/subscriber.h"
+ #include "message_filters/synchronizer.h"
+@@ -30,8 +33,20 @@ private:
+ 
+     void GrabStereo(const sensor_msgs::msg::Image::SharedPtr msgRGB, const sensor_msgs::msg::Image::SharedPtr msgD);
+ 
++    // Publishes the camera pose (Twc, frame "orb_map") and the tracking state for one image pair.
++    void PublishPose(const Sophus::SE3f &Tcw, const builtin_interfaces::msg::Time &stamp);
++
+     ORB_SLAM3::System* m_SLAM;
+ 
++    // /orb_slam3/pose          PoseStamped: left optical camera in the ORB-SLAM3 world frame
++    //                          (origin = first frame), same stamp as the image pair; only when OK.
++    // /orb_slam3/tracking_ok   Bool: true only when the tracking state is OK.
++    // /orb_slam3/tracking_state Int32: raw ORB_SLAM3 eTrackingState (0 no images, 1 not
++    //                          initialised, 2 OK, 3 recently lost, 4 lost); published every frame.
++    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
++    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ok_pub;
++    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr state_pub;
++
+     bool doRectify;
+     cv::Mat M1l,M2l,M1r,M2r;
+ 
 diff --git a/src/stereo/stereo.cpp b/src/stereo/stereo.cpp
 index 1b0eb09..32a7301 100644
 --- a/src/stereo/stereo.cpp

@@ -1,6 +1,6 @@
 """
-Brings up the ugv_vision nodes: Tier 1 + Tier 2 perception, fusion, the SLAM pose
-glue node, and the EKF.
+Brings up the ugv_vision nodes: Tier 1 + Tier 2 perception, fusion and the EKF.
+The ORB-SLAM3 wrapper and its glue node (localization_node) are in orbslam.launch.py.
 
 Usage:
     ros2 launch ugv_vision vision.launch.py
@@ -35,10 +35,9 @@ def generate_launch_description():
         vision_node("depth_obstacle_node"),
         vision_node("segmentation_node"),
         vision_node("costmap_fusion_node"),
-        vision_node("localization_node"),
 
-        # The SLAM backend (ORB-SLAM3 wrapper) is started separately; its launch is
-        # integrated in Phase 1.
+        # ORB-SLAM3 + localization_node: orbslam.launch.py (full_stack.launch.py orbslam:=true).
+        # The EKF reads /localization/slam_pose from there; without it, it only has wheel + gyro.
 
         Node(
             package="robot_localization",

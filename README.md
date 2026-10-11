@@ -83,7 +83,7 @@ Each transform has one publisher: `robot_state_publisher` (fixed and wheel frame
 | 1 | UGV model (URDF/Xacro), spawn in Gazebo, teleoperation, RViz view | Done |
 | 2a | Stereo depth: rectified images, disparity, point cloud (`stereo_image_proc`) | Done |
 | 2b | Mapping: RTAB-Map builds the occupancy grid `/map` from stereo and wheel odometry | Done |
-| 2c | Visual localization with ORB-SLAM3 (stereo) | Built; running it on the simulated feed and publishing its pose to ROS are next |
+| 2c | Visual localization with ORB-SLAM3 (stereo) | Phase 1 code written: wrapper publishes `/orb_slam3/pose`, `localization_node` publishes `/localization/slam_pose`, `tools/eval_localization.py` computes ATE. **Not yet run on a ROS machine**; Gate 1 (ATE < 5 % of distance) is open |
 | 3 | Fuse wheel odometry and visual pose (EKF); connect the `ugv_vision` perception nodes | Pending (interfaces and EKF config fixed, logic not written) |
 | 4 | Autonomous navigation with Nav2 on the stereo map | Pending (Nav2 parameters are a stub) |
 
@@ -103,6 +103,7 @@ pathrage/
 │   │   └── worlds/outdoor_offroad.world
 │   ├── ugv_vision/              
 │   │   ├── launch/slam.launch.py           
+│   │   ├── launch/orbslam.launch.py        ORB-SLAM3 wrapper + localization_node
 │   │   └── config/orbslam3_stereo_pinhole.yaml
 │   └── ugv_navigation/           
 ├── scripts/setup_orbslam3.sh     
@@ -153,7 +154,9 @@ bash scripts/setup_orbslam3.sh 2>&1 | tee /tmp/setup_orbslam3.log
 source ~/.bashrc
 ```
 
-It installs the build dependencies, builds Pangolin v0.8 and ORB-SLAM3 (branch `c++14_comp`), adds the library paths to `~/.bashrc`, clones the wrapper `zang09/ORB_SLAM3_ROS2`, applies `third_party/orbslam3_ros2_humble.patch` and builds the wrapper with one compile job at a time.
+It installs the build dependencies, builds Pangolin v0.8 and ORB-SLAM3 (branch `c++14_comp`), adds the library paths to `~/.bashrc`, clones the wrapper `zang09/ORB_SLAM3_ROS2` (pinned to the commit the patch was made against), applies `third_party/orbslam3_ros2_humble.patch` and builds the wrapper with one compile job at a time. The patch makes the wrapper publish `/orb_slam3/pose`, `/orb_slam3/tracking_ok` and `/orb_slam3/tracking_state`; the script stops if that publisher is missing after patching.
+
+Already built the wrapper with the old patch? Run `git checkout .` inside `~/orbslam_ws/src/orbslam3_ros2` and re-run the script (existing Pangolin and ORB-SLAM3 checkouts are reused; their build steps run again but are quick when nothing changed).
 
 ---
 
@@ -168,6 +171,26 @@ ros2 launch ugv_navigation full_stack.launch.py            # add gui:=true to sh
 ```
 
 Then drive with teleop (Terminal D below) and open the 3D view: add `viewer:=true` and browse to http://127.0.0.1:8080 (section 5.2), or open RViz (Terminal E). `vision:=true` also starts the perception nodes and EKF; `nav:=true` needs the Phase 4 Nav2 parameters.
+
+### 5.0b With ORB-SLAM3 (Phase 1)
+
+ORB-SLAM3 needs texture and some motion to initialise: use `offroad_sparse` or `offroad_forest`.
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/orbslam_ws/install/setup.bash          # the patched wrapper (orbslam3 package)
+source ~/pathrage/install/setup.bash
+ros2 launch ugv_navigation full_stack.launch.py orbslam:=true viewer:=true world:=offroad_sparse
+```
+
+Drive a route and measure the error (second terminal each, same sourcing):
+
+```bash
+python3 tools/eval_localization.py record R1 --duration 80     # records, prints ATE, saves results/R1_*.csv
+python3 tools/drive_route.py R1 --speed 0.4
+```
+
+In the viewer: cyan = ORB-SLAM3, green = ground truth (display only), yellow = driven path; the status panel shows tracking OK/LOST and the live position error. Check with `ros2 topic hz /localization/slam_pose`. Note the speed and turn rate at which tracking is lost (step 1.8 of the plan): it sets the Nav2 speed limit in Phase 4. Not yet run on a ROS machine.
 
 ### 5.1 Step by step
 

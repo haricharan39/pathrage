@@ -130,3 +130,15 @@ def test_classify_height():
     h = np.array([0.0, 0.2, -0.3, 0.1], np.float32)
     c = vc.classify_height(h, 0.15, -0.2)
     assert list(c) == [vc.CLS_GROUND, vc.CLS_OBSTACLE, vc.CLS_DROP, vc.CLS_GROUND]
+
+
+def test_ground_truth_alignment():
+    # robot at (2, 1) heading 90 deg in the fixed frame, but (10, 5) heading 0 in world
+    s2 = np.sqrt(0.5)
+    t_fixed_base = vc.pose_to_matrix([2.0, 1.0, 0.0], [0.0, 0.0, s2, s2])
+    t_world_base = vc.pose_to_matrix([10.0, 5.0, 0.0], [0.0, 0.0, 0.0, 1.0])
+    m = vc.align_transform(t_fixed_base, t_world_base)
+    assert np.allclose(vc.apply_matrix(m, [10.0, 5.0, 0.0]), [[2.0, 1.0, 0.0]], atol=1e-9)
+    # one metre ahead in world x is one metre ahead along the robot's heading (+y in fixed)
+    assert np.allclose(vc.apply_matrix(m, [11.0, 5.0, 0.0]), [[2.0, 2.0, 0.0]], atol=1e-9)
+    assert np.allclose(vc.invert_matrix(m) @ m, np.eye(4), atol=1e-9)

@@ -3,7 +3,8 @@ Single entry point for the whole stack.
 
 Always starts:   Gazebo + robot (ugv_description)
 Starts by default: stereo depth (stereo_image_proc) and RTAB-Map mapping
-Optional layers: vision:=true (perception nodes + EKF), nav:=true (Nav2),
+Optional layers: vision:=true (perception nodes + EKF), orbslam:=true (ORB-SLAM3 pose),
+                 nav:=true (Nav2),
                  viewer:=true (browser 3D viewer at http://127.0.0.1:8080, replaces RViz2 for 3D)
 
 Usage:
@@ -11,6 +12,10 @@ Usage:
     ros2 launch ugv_navigation full_stack.launch.py gui:=true
     ros2 launch ugv_navigation full_stack.launch.py slam:=false vision:=true
     ros2 launch ugv_navigation full_stack.launch.py viewer:=true
+    ros2 launch ugv_navigation full_stack.launch.py orbslam:=true viewer:=true world:=offroad_sparse
+
+orbslam:=true needs the ORB-SLAM3 workspace sourced first (source ~/orbslam_ws/install/setup.bash,
+see README 4.4) and a textured world (offroad_sparse or offroad_forest).
 
 Phase 0 state: `vision` is off by default because the perception nodes are
 interface-only until Phases 3/6/7, and `nav` is off by default because the Nav2
@@ -93,6 +98,13 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration("viewer")))],
     )
 
+    orbslam = TimerAction(
+        period=delay,
+        actions=[GroupAction(
+            [_include("ugv_vision", "launch", "orbslam.launch.py", use_sim_time="true")],
+            condition=IfCondition(LaunchConfiguration("orbslam")))],
+    )
+
     navigation = TimerAction(
         period=delay,
         actions=[GroupAction(
@@ -110,6 +122,8 @@ def generate_launch_description():
                               description="Start stereo_image_proc and RTAB-Map"),
         DeclareLaunchArgument("vision", default_value="false",
                               description="Start perception nodes and the EKF"),
+        DeclareLaunchArgument("orbslam", default_value="false",
+                              description="Start ORB-SLAM3 + localization_node (needs the slam stereo chain)"),
         DeclareLaunchArgument("viewer", default_value="false",
                               description="Start the browser 3D viewer (ugv_viewer)"),
         DeclareLaunchArgument("x", default_value="0.0", description="Robot spawn x (m)"),
@@ -127,6 +141,7 @@ def generate_launch_description():
         sim,
         perception_chain,
         vision,
+        orbslam,
         viewer,
         navigation,
     ])

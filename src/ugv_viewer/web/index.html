@@ -52,7 +52,9 @@
     <label class="row"><input type="checkbox" id="lMap" checked> Accumulated map</label>
     <label class="row"><input type="checkbox" id="lLive" checked> Live camera frame</label>
     <label class="row"><input type="checkbox" id="lTier1" checked> Tier-1 obstacles</label>
-    <label class="row"><input type="checkbox" id="lTraj" checked> Trajectory</label>
+    <label class="row"><input type="checkbox" id="lTraj" checked> Path driven (TF)</label>
+    <label class="row"><input type="checkbox" id="lSlam" checked> ORB-SLAM3 trajectory</label>
+    <label class="row"><input type="checkbox" id="lGt" checked> Ground truth</label>
     <label class="row"><input type="checkbox" id="lPlan" checked> Nav2 plan / goal</label>
     <label class="row"><input type="checkbox" id="lRobot" checked> Robot</label>
     <label class="row"><input type="checkbox" id="lFrustum"> Camera frustum</label>
@@ -71,7 +73,7 @@
     <h3>Map</h3>
     <div class="btns">
       <button id="clearMap">Clear map</button>
-      <button id="clearTraj">Clear path</button>
+      <button id="clearTraj" title="Also re-aligns the ground truth to the robot's current pose">Clear paths</button>
     </div>
     <label class="row" style="margin-top:6px"><input type="checkbox" id="goalMode"> Double-click ground to send goal</label>
   </div>
@@ -87,6 +89,8 @@
   <div class="kv"><span>Process time</span><span id="vProc">-</span></div>
   <div class="kv"><span>Render FPS</span><span id="vFps">-</span></div>
   <div class="kv"><span>Robot x, y</span><span id="vPose">-</span></div>
+  <div class="kv"><span>ORB-SLAM3</span><span><i class="dot" id="dotSlam"></i><span id="vSlam">not running</span></span></div>
+  <div class="kv"><span>Position error</span><span id="vErr">-</span></div>
   <div id="warn"></div>
 </div>
 
@@ -96,6 +100,8 @@
   <span><i class="sw" style="background:#6e8ba8"></i>ground</span>
   <span><i class="sw" style="background:#2fd4ff"></i>plan</span>
   <span><i class="sw" style="background:#ffd23e"></i>path driven</span>
+  <span><i class="sw" style="background:#00f0ff"></i>ORB-SLAM3</span>
+  <span><i class="sw" style="background:#39ff6a"></i>ground truth</span>
   <span style="color:var(--dim)">class colours are a height-based preview, not the Tier-1 result</span>
 </div>
 

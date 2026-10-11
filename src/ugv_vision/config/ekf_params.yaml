@@ -34,8 +34,9 @@ ekf_filter_node:
                    false, false, true,
                    false, false, false]
 
-    # ORB-SLAM3 pose via ugv_vision/localization_node. Frame/covariance handling and
-    # whether it should be relative are settled in Phase 1.
+    # ORB-SLAM3 pose via ugv_vision/localization_node (Phase 1): base_footprint pose in the
+    # odom frame, relative to the first accepted frame, with covariance (inflated after jumps
+    # and new maps). Absolute fusion and jump rejection are tuned in Phase 2.
     pose0: /localization/slam_pose
     pose0_queue_size: 10
     pose0_config: [true,  true,  false,

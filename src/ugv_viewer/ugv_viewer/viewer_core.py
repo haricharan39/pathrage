@@ -9,7 +9,8 @@ Wire format (binary WebSocket frames, little endian, all arrays 4-byte aligned):
   MSG_MAP_DELTA (1):   idx[n] uint32 | pos[n*3] float32 | rgb[n*3] uint8 + pad to 4n | cls[n] uint8 + pad
   MSG_LIVE      (2):   pos[n*3] float32 | rgb[n*3] uint8 (padded)  | cls[n] uint8 (padded)   (replace)
   MSG_TIER1     (3):   pos[n*3] float32                                                     (replace)
-Everything else (robot pose, trajectory, plan, goal, stats) is JSON text.
+Everything else (robot pose, trajectories, plan, goal, stats) is JSON text. Trajectory messages
+carry `which`: "driven" (TF base pose), "slam" (/localization/slam_pose) or "gt" (/ground_truth/odom).
 """
 import struct
 import threading
@@ -98,6 +99,37 @@ def transform_points(xyz, translation, quat_xyzw):
     """p' = R p + t for an [N,3] array."""
     r = quat_to_matrix(*quat_xyzw)
     return (xyz.astype(np.float64) @ r.T + np.asarray(translation, dtype=np.float64)).astype(np.float32)
+
+
+def pose_to_matrix(translation, quat_xyzw):
+    """4x4 matrix of a pose (position + quaternion)."""
+    m = np.eye(4)
+    m[:3, :3] = quat_to_matrix(*quat_xyzw)
+    m[:3, 3] = translation
+    return m
+
+
+def invert_matrix(m):
+    out = np.eye(4)
+    out[:3, :3] = m[:3, :3].T
+    out[:3, 3] = -m[:3, :3].T @ m[:3, 3]
+    return out
+
+
+def align_transform(t_fixed_base, t_world_base):
+    """Matrix taking points from the ground-truth `world` frame into the viewer's fixed frame.
+
+    Both arguments are poses of the SAME instant: the robot base in the fixed frame (from TF)
+    and the robot base in `world` (from /ground_truth/odom). Display only: the ground truth is
+    never used by the robot.
+    """
+    return t_fixed_base @ invert_matrix(t_world_base)
+
+
+def apply_matrix(m, xyz):
+    """p' = M p for an [N,3] array (or a single point)."""
+    pts = np.atleast_2d(np.asarray(xyz, dtype=np.float64))
+    return pts @ m[:3, :3].T + m[:3, 3]
 
 
 # ----------------------------------------------------------------------------------------
