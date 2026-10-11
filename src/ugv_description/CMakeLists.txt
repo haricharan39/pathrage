@@ -6,7 +6,7 @@ find_package(ament_cmake REQUIRED)
 # Install URDF/xacro, worlds, launch files, and meshes so other packages
 # and `ros2 launch` can find them under the package's share/ directory.
 install(
-  DIRECTORY urdf worlds launch meshes
+  DIRECTORY urdf worlds launch meshes models
   DESTINATION share/${PROJECT_NAME}
 )
 

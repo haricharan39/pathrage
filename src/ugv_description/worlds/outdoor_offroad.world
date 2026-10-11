@@ -4,7 +4,7 @@
 
   Build order (see the software-only build plan in /docs):
     1. Start with just the ground plane + sun + a handful of simple
-       obstacle boxes/cylinders standing in for rocks -- get Nav2 driving
+       obstacle boxes/cylinders standing in for rocks - get Nav2 driving
        against the depth-only costmap first.
     2. Add uneven terrain (a heightmap) once the flat-ground version works.
     3. Add denser obstacles / narrower gaps for stress-testing TEB and the
@@ -25,7 +25,7 @@
       <uri>model://ground_plane</uri>
     </include>
 
-    <!-- Placeholder obstacles -- replace/add more as scenarios get harder -->
+    <!-- Placeholder obstacles - replace/add more as scenarios get harder -->
     <model name="rock_1">
       <static>true</static>
       <pose>3 1 0.15 0 0 0</pose>

@@ -52,6 +52,20 @@ implementation arrives in that phase of the execution plan.
 Until Phase 7, the Nav2 `ObstacleLayer` reads `/perception/tier1_obstacles` directly
 (Phase 4). Class ids: 0 unknown, 1 traversable, 2 caution, 3 hazard (finalized in Phase 6).
 
+### 3D viewer (`ugv_viewer`, development tool, nothing depends on it)
+
+| Topic / TF | Direction | Use |
+|---|---|---|
+| `/points2` | subscribe | accumulated into the voxel map (trusted range 0.8-6 m) |
+| `/perception/tier1_obstacles` | subscribe | drawn as the red Tier-1 overlay (Phase 3) |
+| `/plan`, `/goal_pose` | subscribe | plan line and goal marker (Phase 4) |
+| `/goal_pose` | **publish, opt-in** | only on double-click in the page with "send goal" ticked; `frame_id` = viewer fixed frame |
+| TF `<fixed_frame> <- left_camera_optical_frame, base_footprint` | read | `fixed_frame` defaults to `odom` |
+
+The viewer publishes no TF and writes nothing to the perception topics. Its obstacle colouring is a
+height-based preview (`obstacle_thresh` 0.15 m, `drop_thresh` -0.20 m, same defaults as
+`depth_obstacle_node`), not the Tier-1 result.
+
 ## 2. Frames and transforms (one publisher per transform)
 
 ```
@@ -90,5 +104,8 @@ used only by evaluation scripts.
 | `ros2 launch ugv_navigation full_stack.launch.py` | Gazebo + robot, stereo depth, RTAB-Map |
 | `... full_stack.launch.py vision:=true` | + perception nodes and EKF (`publish_tf` off until Phase 2) |
 | `... full_stack.launch.py nav:=true` | + Nav2 (needs the Phase 4 parameter file) |
+| `... full_stack.launch.py viewer:=true` | + browser 3D viewer at http://127.0.0.1:8080 |
+| `... full_stack.launch.py world:=offroad_forest` | any world in `worlds/` (name or full path), see docs/WORLDS.md |
+| `ros2 launch ugv_viewer viewer.launch.py` | 3D viewer only |
 | `ros2 launch ugv_description gazebo.launch.py` | Gazebo + robot only |
 | `ros2 launch ugv_description display.launch.py` | URDF in RViz with joint sliders (no Gazebo) |

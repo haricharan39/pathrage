@@ -131,7 +131,7 @@ sudo apt install -y \
   ros-humble-rqt-image-view ros-humble-tf2-tools \
   ros-humble-stereo-image-proc ros-humble-rtabmap-ros \
   ros-humble-robot-localization ros-humble-nav2-bringup ros-humble-nav2-mppi-controller \
-  liburdfdom-tools graphviz
+  python3-aiohttp python3-numpy liburdfdom-tools graphviz
 ```
 
 ### 4.3 Build the ROS 2 packages
@@ -139,7 +139,7 @@ sudo apt install -y \
 ```bash
 source /opt/ros/humble/setup.bash
 cd ~/pathrage
-colcon build --packages-select ugv_description ugv_vision ugv_navigation --symlink-install
+colcon build --packages-select ugv_description ugv_vision ugv_viewer ugv_navigation --symlink-install
 source install/setup.bash
 ```
 
@@ -167,7 +167,7 @@ source ~/pathrage/install/setup.bash
 ros2 launch ugv_navigation full_stack.launch.py            # add gui:=true to show Gazebo
 ```
 
-Then drive with teleop (Terminal D below) and open RViz (Terminal E). `vision:=true` also starts the perception nodes and EKF; `nav:=true` needs the Phase 4 Nav2 parameters.
+Then drive with teleop (Terminal D below) and open the 3D view: add `viewer:=true` and browse to http://127.0.0.1:8080 (section 5.2), or open RViz (Terminal E). `vision:=true` also starts the perception nodes and EKF; `nav:=true` needs the Phase 4 Nav2 parameters.
 
 ### 5.1 Step by step
 
@@ -207,9 +207,37 @@ Drive forward slowly for a few metres and turn gradually. RTAB-Map only adds map
 rviz2 --ros-args -p use_sim_time:=true
 ```
 
+### 5.2 3D viewer (replaces RViz2 for 3D)
+
+```bash
+ros2 launch ugv_navigation full_stack.launch.py viewer:=true       # or: ros2 launch ugv_viewer viewer.launch.py
+# open http://127.0.0.1:8080   (add open_browser:=true to open it for you)
+```
+
+A browser page (WebGL) shows the accumulated stereo point cloud as a voxel map, coloured by obstacle
+class / height / camera colour, plus the live camera frame, the path driven, the robot and, later, the
+Tier-1 obstacles and the Nav2 plan. Orbit with the left mouse button, pan with the right, zoom with the
+wheel; keys `F` follow, `C` chase view, `T` top view, `R` reset. Only the node's CPU work is in ROS; the
+drawing happens on the GPU of the machine running the browser.
+
+Check the page and your GPU without ROS: `ros2 run ugv_viewer viewer_demo` (synthetic robot driving through rocks).
+If it lags: raise `voxel_size:=0.08`, lower `max_points:=800000`, or untick "Live camera frame".
+Remote viewing: `host:=0.0.0.0` (the page has no login, use only on a trusted network).
+Details: `src/ugv_viewer/`, interface contract: `docs/INTERFACES.md`.
+
+### 5.3 Changing the world
+
+```bash
+ros2 launch ugv_navigation full_stack.launch.py world:=offroad_forest viewer:=true
+```
+
+See [`docs/WORLDS.md`](docs/WORLDS.md) for making and editing worlds.
+
 ---
 
 
 ## Licenses and third-party software
+
+The 3D viewer bundles three.js (MIT, `src/ugv_viewer/web/vendor/`).
 
 ORB-SLAM3 is licensed under GPLv3 and is built from its own repository; it is not copied into this repository. RTAB-Map, `stereo_image_proc`, Gazebo and ROS 2 packages are installed from their upstream packages under their own licenses.

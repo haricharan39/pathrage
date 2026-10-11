@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VisionNav 3D viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; --bg:#12151a; --panel:#1b2028ee; --line:#2c3440; --fg:#d7dde6; --dim:#8a95a5; --acc:#4fb3ff; --bad:#ff6b5e; --ok:#5ed38a; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px/1.4 system-ui, sans-serif; overflow:hidden; }
+  #view { position:fixed; inset:0; }
+  canvas { display:block; }
+  .panel { position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; backdrop-filter:blur(4px); }
+  #controls { top:12px; left:12px; width:230px; max-height:calc(100% - 24px); overflow:auto; }
+  #hud { top:12px; right:12px; min-width:210px; font-variant-numeric:tabular-nums; }
+  #legend { bottom:12px; left:12px; display:flex; gap:14px; align-items:center; }
+  h3 { margin:0 0 6px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .group { margin-bottom:12px; }
+  label.row { display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; user-select:none; }
+  select, button { background:#252c37; color:var(--fg); border:1px solid var(--line); border-radius:5px; padding:4px 8px; font:inherit; cursor:pointer; }
+  button:hover, select:hover { border-color:var(--acc); }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  input[type=range] { width:100%; }
+  .kv { display:flex; justify-content:space-between; gap:12px; }
+  .kv span:first-child { color:var(--dim); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:var(--bad); }
+  .dot.on { background:var(--ok); }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+  #warn { color:var(--bad); margin-top:6px; display:none; }
+  kbd { background:#252c37; border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:11px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="view"></div>
+
+<div id="controls" class="panel">
+  <div class="group">
+    <h3>Map colour</h3>
+    <select id="mode" style="width:100%">
+      <option value="0">Camera colour</option>
+      <option value="1">Height</option>
+      <option value="2" selected>Obstacle class</option>
+    </select>
+    <label class="row"><input type="checkbox" id="obstOnly"> Obstacles only</label>
+    <div style="margin-top:6px;color:var(--dim)">Point size</div>
+    <input type="range" id="size" min="0.5" max="3" step="0.1" value="1">
+  </div>
+  <div class="group">
+    <h3>Layers</h3>
+    <label class="row"><input type="checkbox" id="lMap" checked> Accumulated map</label>
+    <label class="row"><input type="checkbox" id="lLive" checked> Live camera frame</label>
+    <label class="row"><input type="checkbox" id="lTier1" checked> Tier-1 obstacles</label>
+    <label class="row"><input type="checkbox" id="lTraj" checked> Trajectory</label>
+    <label class="row"><input type="checkbox" id="lPlan" checked> Nav2 plan / goal</label>
+    <label class="row"><input type="checkbox" id="lRobot" checked> Robot</label>
+    <label class="row"><input type="checkbox" id="lFrustum"> Camera frustum</label>
+    <label class="row"><input type="checkbox" id="lGrid" checked> Grid</label>
+  </div>
+  <div class="group">
+    <h3>Camera</h3>
+    <label class="row"><input type="checkbox" id="follow" checked> Follow robot <kbd>F</kbd></label>
+    <div class="btns">
+      <button id="vChase">Chase <kbd>C</kbd></button>
+      <button id="vTop">Top <kbd>T</kbd></button>
+      <button id="vReset">Reset <kbd>R</kbd></button>
+    </div>
+  </div>
+  <div class="group">
+    <h3>Map</h3>
+    <div class="btns">
+      <button id="clearMap">Clear map</button>
+      <button id="clearTraj">Clear path</button>
+    </div>
+    <label class="row" style="margin-top:6px"><input type="checkbox" id="goalMode"> Double-click ground to send goal</label>
+  </div>
+</div>
+
+<div id="hud" class="panel">
+  <h3>Status</h3>
+  <div class="kv"><span>Link</span><span><i class="dot" id="dotWs"></i><span id="vWs">connecting</span></span></div>
+  <div class="kv"><span>TF</span><span><i class="dot" id="dotTf"></i><span id="vTf">-</span></span></div>
+  <div class="kv"><span>Fixed frame</span><span id="vFrame">-</span></div>
+  <div class="kv"><span>Map voxels</span><span id="vPts">0</span></div>
+  <div class="kv"><span>Cloud rate</span><span id="vRate">-</span></div>
+  <div class="kv"><span>Process time</span><span id="vProc">-</span></div>
+  <div class="kv"><span>Render FPS</span><span id="vFps">-</span></div>
+  <div class="kv"><span>Robot x, y</span><span id="vPose">-</span></div>
+  <div id="warn"></div>
+</div>
+
+<div id="legend" class="panel">
+  <span><i class="sw" style="background:#ff4b3e"></i>obstacle</span>
+  <span><i class="sw" style="background:#ff2fd0"></i>drop-off</span>
+  <span><i class="sw" style="background:#6e8ba8"></i>ground</span>
+  <span><i class="sw" style="background:#2fd4ff"></i>plan</span>
+  <span><i class="sw" style="background:#ffd23e"></i>path driven</span>
+  <span style="color:var(--dim)">class colours are a height-based preview, not the Tier-1 result</span>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

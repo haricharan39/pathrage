@@ -3,16 +3,20 @@ Single entry point for the whole stack.
 
 Always starts:   Gazebo + robot (ugv_description)
 Starts by default: stereo depth (stereo_image_proc) and RTAB-Map mapping
-Optional layers: vision:=true (perception nodes + EKF), nav:=true (Nav2)
+Optional layers: vision:=true (perception nodes + EKF), nav:=true (Nav2),
+                 viewer:=true (browser 3D viewer at http://127.0.0.1:8080, replaces RViz2 for 3D)
 
 Usage:
     ros2 launch ugv_navigation full_stack.launch.py
     ros2 launch ugv_navigation full_stack.launch.py gui:=true
     ros2 launch ugv_navigation full_stack.launch.py slam:=false vision:=true
+    ros2 launch ugv_navigation full_stack.launch.py viewer:=true
 
 Phase 0 state: `vision` is off by default because the perception nodes are
 interface-only until Phases 3/6/7, and `nav` is off by default because the Nav2
 parameter file is a stub until Phase 4. Turning `nav` on now will fail.
+
+Spawn pose / viewer options: x:=2.0 y:=-1.0 yaw:=1.57 voxel_size:=0.08 open_browser:=true
 """
 import os
 
@@ -23,13 +27,15 @@ from launch.actions import (DeclareLaunchArgument, GroupAction,
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch.substitution import Substitution
 
 
 def _include(package, *path, **launch_arguments):
     return IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory(package), *path)),
-        launch_arguments={k: str(v) for k, v in launch_arguments.items()}.items(),
+        launch_arguments={k: (v if isinstance(v, Substitution) else str(v))
+                          for k, v in launch_arguments.items()}.items(),
     )
 
 
@@ -45,7 +51,8 @@ def generate_launch_description():
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(description_dir, "launch", "gazebo.launch.py")),
-        launch_arguments={"gui": gui, "world": world}.items(),
+        launch_arguments={"gui": gui, "world": world, "x": LaunchConfiguration("x"),
+                          "y": LaunchConfiguration("y"), "yaw": LaunchConfiguration("yaw")}.items(),
     )
 
     # Stereo depth: rectified images, /disparity, /points2.
@@ -76,6 +83,16 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration("vision")))],
     )
 
+    viewer = TimerAction(
+        period=delay,
+        actions=[GroupAction(
+            [_include("ugv_viewer", "launch", "viewer.launch.py",
+                      voxel_size=LaunchConfiguration("voxel_size"),
+                      open_browser=LaunchConfiguration("open_browser"),
+                      host=LaunchConfiguration("host"))],
+            condition=IfCondition(LaunchConfiguration("viewer")))],
+    )
+
     navigation = TimerAction(
         period=delay,
         actions=[GroupAction(
@@ -93,6 +110,16 @@ def generate_launch_description():
                               description="Start stereo_image_proc and RTAB-Map"),
         DeclareLaunchArgument("vision", default_value="false",
                               description="Start perception nodes and the EKF"),
+        DeclareLaunchArgument("viewer", default_value="false",
+                              description="Start the browser 3D viewer (ugv_viewer)"),
+        DeclareLaunchArgument("x", default_value="0.0", description="Robot spawn x (m)"),
+        DeclareLaunchArgument("y", default_value="0.0", description="Robot spawn y (m)"),
+        DeclareLaunchArgument("yaw", default_value="0.0", description="Robot spawn heading (rad)"),
+        DeclareLaunchArgument("voxel_size", default_value="0.05",
+                              description="Viewer map resolution in m (0.08-0.10 if the browser lags)"),
+        DeclareLaunchArgument("open_browser", default_value="false", description="Open the viewer page"),
+        DeclareLaunchArgument("host", default_value="127.0.0.1",
+                              description="Viewer bind address (0.0.0.0 for other machines)"),
         DeclareLaunchArgument("nav", default_value="false",
                               description="Start Nav2 (needs Phase 4 parameters)"),
         DeclareLaunchArgument("startup_delay", default_value="8.0",
@@ -100,5 +127,6 @@ def generate_launch_description():
         sim,
         perception_chain,
         vision,
+        viewer,
         navigation,
     ])
