@@ -24,7 +24,9 @@
   Control: libgazebo_ros_diff_drive.so with num_wheel_pairs=2 (front pair + rear pair),
   so left wheels and right wheels receive coordinated velocity commands from /cmd_vel.
   Joint states come from libgazebo_ros_joint_state_publisher.so; wheel TF is published
-  ONLY by robot_state_publisher; odom->base_footprint ONLY by the diff-drive plugin.
+  ONLY by robot_state_publisher; odom->base_footprint ONLY by the EKF (ugv_vision, Phase 2): the
+  diff-drive plugin publishes /odom but NOT the transform (publish_odom_tf false). Without the EKF
+  running there is no odom->base_footprint, so start the stack with full_stack.launch.py.
 -->
 <robot name="visionnav" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
@@ -371,7 +373,8 @@
 
       <command_topic>cmd_vel</command_topic>
       <publish_odom>true</publish_odom>
-      <publish_odom_tf>true</publish_odom_tf>
+      <!-- Phase 2: the EKF (ekf_params.yaml publish_tf true) owns odom -> base_footprint. Never both. -->
+      <publish_odom_tf>false</publish_odom_tf>
       <publish_wheel_tf>false</publish_wheel_tf>
       <odometry_topic>odom</odometry_topic>
       <odometry_frame>odom</odometry_frame>

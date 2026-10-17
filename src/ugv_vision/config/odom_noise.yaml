@@ -1,0 +1,15 @@
+# Errors injected into the wheel odometry by odom_noise_node (Phase 2, step 2.1).
+# Used when full_stack.launch.py is started with odom_noise:=true. The seed (launch arg
+# noise_seed, default 42) fixes the systematic errors, so every run of a route sees the same
+# ones. Write the values you used next to your results.
+odom_noise_node:
+  ros__parameters:
+    use_sim_time: true
+    input_topic: /odom
+    output_topic: /odom_noisy
+    scale_err_min: 0.03     # speed-scale error magnitude, fraction (3-5 %), sign drawn from the seed
+    scale_err_max: 0.05
+    yaw_bias: 0.003         # rad/s, added to the yaw rate while the robot moves
+    sigma_v: 0.02           # m/s, Gaussian noise per sample on the forward speed
+    sigma_w: 0.01           # rad/s, Gaussian noise per sample on the yaw rate
+    max_dt: 0.5             # s, integration step limit

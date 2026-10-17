@@ -59,7 +59,7 @@ map → odom → base_footprint → base_link
                                       └── right_camera_frame → right_camera_optical_frame
 ```
 
-Each transform has one publisher: `robot_state_publisher` (fixed and wheel frames), the Gazebo drive plugin (`odom → base_footprint`) and RTAB-Map (`map → odom`).
+Each transform has one publisher: `robot_state_publisher` (fixed and wheel frames), the EKF (`odom → base_footprint`, since Phase 2; the Gazebo drive plugin publishes `/odom` but no transform) and RTAB-Map (`map → odom`).
 
 ### Main topics
 
@@ -72,6 +72,8 @@ Each transform has one publisher: `robot_state_publisher` (fixed and wheel frame
 | `/stereo_camera/{left,right}/image_raw`, `.../camera_info` | raw stereo images |
 | `/stereo_camera/{left,right}/image_rect` | rectified images |
 | `/disparity`, `/points2` | stereo depth |
+| `/odom_noisy` | wheel odometry with seeded errors (only with `odom_noise:=true`) |
+| `/odometry/filtered`, `/localization/status` | fused EKF pose; fused / degraded health (Phase 2) |
 | `/map`, `/mapData`, `/mapGraph`, `/info` | RTAB-Map outputs |
 
 ---
@@ -84,7 +86,8 @@ Each transform has one publisher: `robot_state_publisher` (fixed and wheel frame
 | 2a | Stereo depth: rectified images, disparity, point cloud (`stereo_image_proc`) | Done |
 | 2b | Mapping: RTAB-Map builds the occupancy grid `/map` from stereo and wheel odometry | Done |
 | 2c | Visual localization with ORB-SLAM3 (stereo) | Phase 1 code written: wrapper publishes `/orb_slam3/pose`, `localization_node` publishes `/localization/slam_pose`, `tools/eval_localization.py` computes ATE. **Not yet run on a ROS machine**; Gate 1 (ATE < 5 % of distance) is open |
-| 3 | Fuse wheel odometry and visual pose (EKF); connect the `ugv_vision` perception nodes | Pending (interfaces and EKF config fixed, logic not written) |
+| 3a | Phase 2: EKF fusion of wheel odometry (optionally with seeded noise), the ORB-SLAM3 pose and the IMU gyro; EKF owns `odom` -> `base_footprint`; `/localization/status` fused / degraded | Code written, **not yet run on a ROS machine**; Gate 2 (results table, TF tree) is open |
+| 3b | Connect the `ugv_vision` perception nodes | Pending (interfaces fixed, logic not written) |
 | 4 | Autonomous navigation with Nav2 on the stereo map | Pending (Nav2 parameters are a stub) |
 
 The phase-by-phase plan is in [`docs/PLAN.md`](docs/PLAN.md); interface contracts are in [`docs/INTERFACES.md`](docs/INTERFACES.md). The simulated IMU and ground-truth odometry are in the robot model; the `ugv_vision` nodes, EKF config, and `full_stack.launch.py` now follow the topic and frame names in that file.
@@ -104,7 +107,10 @@ pathrage/
 │   ├── ugv_vision/              
 │   │   ├── launch/slam.launch.py           
 │   │   ├── launch/orbslam.launch.py        ORB-SLAM3 wrapper + localization_node
-│   │   └── config/orbslam3_stereo_pinhole.yaml
+│   │   ├── launch/localization.launch.py   EKF + localization status (+ odom_noise_node)
+│   │   ├── config/orbslam3_stereo_pinhole.yaml
+│   │   ├── config/ekf_params.yaml          EKF inputs and noise (Phase 2)
+│   │   └── config/odom_noise.yaml          injected wheel-odometry errors (Phase 2)
 │   └── ugv_navigation/           
 ├── scripts/setup_orbslam3.sh     
 └── README.md
@@ -170,7 +176,7 @@ source ~/pathrage/install/setup.bash
 ros2 launch ugv_navigation full_stack.launch.py            # add gui:=true to show Gazebo
 ```
 
-Then drive with teleop (Terminal D below) and open the 3D view: add `viewer:=true` and browse to http://127.0.0.1:8080 (section 5.2), or open RViz (Terminal E). `vision:=true` also starts the perception nodes and EKF; `nav:=true` needs the Phase 4 Nav2 parameters.
+This also starts the EKF, which owns the `odom` -> `base_footprint` transform since Phase 2 (the Gazebo plugin no longer publishes it), so the one command above is always needed for a complete TF tree. Then drive with teleop (Terminal D below) and open the 3D view: add `viewer:=true` and browse to http://127.0.0.1:8080 (section 5.2), or open RViz (Terminal E). `vision:=true` starts the perception nodes (interface-only until Phases 3/6/7); `nav:=true` needs the Phase 4 Nav2 parameters.
 
 ### 5.0b With ORB-SLAM3 (Phase 1)
 
@@ -191,6 +197,27 @@ python3 tools/drive_route.py R1 --speed 0.4
 ```
 
 In the viewer: cyan = ORB-SLAM3, green = ground truth (display only), yellow = driven path; the status panel shows tracking OK/LOST and the live position error. Check with `ros2 topic hz /localization/slam_pose`. Note the speed and turn rate at which tracking is lost (step 1.8 of the plan): it sets the Nav2 speed limit in Phase 4. Not yet run on a ROS machine.
+
+### 5.0c Fused localization (Phase 2)
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/orbslam_ws/install/setup.bash
+source ~/pathrage/install/setup.bash
+colcon build --packages-select ugv_description ugv_vision ugv_viewer ugv_navigation --symlink-install   # once, after pulling Phase 2
+ros2 launch ugv_navigation full_stack.launch.py orbslam:=true odom_noise:=true viewer:=true world:=offroad_sparse
+```
+
+`odom_noise:=true` makes the EKF read `/odom_noisy` (seeded wheel-slip, yaw-bias and noise errors, see `config/odom_noise.yaml`; `noise_seed:=7` changes the systematic errors). Record a route and compare noisy wheel odometry, ORB-SLAM3 and the fused pose (second and third terminal, same sourcing):
+
+```bash
+python3 tools/eval_fusion.py record R1 --duration 80                 # saves results/phase2/R1_*.csv, prints ATE per source
+python3 tools/drive_route.py R1 --speed 0.4
+python3 tools/eval_fusion.py record R2 --duration 220 --kill-orbslam-at 90   # fallback test: kills ORB-SLAM3 at t=90 s
+python3 tools/eval_fusion.py table                                   # R1-R3 table -> results/phase2/ate_table.md/.csv
+```
+
+The yellow path in the viewer is now the fused EKF pose, red is the noisy wheel odometry, cyan ORB-SLAM3, green ground truth; the status panel shows fused / degraded and the live error of the fused pose. Save the TF tree for the docs with `ros2 run tf2_tools view_frames` (move the PDF/GV into `docs/`); it must show one publisher per transform. Not yet run on a ROS machine.
 
 ### 5.1 Step by step
 
@@ -218,6 +245,8 @@ ros2 launch stereo_image_proc stereo_image_proc.launch.py \
 ```bash
 ros2 launch ugv_vision slam.launch.py
 ```
+
+Phase 2 note: the manual route also needs the EKF now (nothing else publishes `odom` -> `base_footprint`): `ros2 launch ugv_vision localization.launch.py` in another terminal.
 
 **Terminal D: drive the robot**
 ```bash

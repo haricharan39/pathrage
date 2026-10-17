@@ -2,8 +2,10 @@
 Single entry point for the whole stack.
 
 Always starts:   Gazebo + robot (ugv_description)
-Starts by default: stereo depth (stereo_image_proc) and RTAB-Map mapping
-Optional layers: vision:=true (perception nodes + EKF), orbslam:=true (ORB-SLAM3 pose),
+Starts by default: stereo depth (stereo_image_proc), RTAB-Map mapping and the localization layer
+                 (EKF + status node; the EKF owns the odom -> base_footprint transform since Phase 2)
+Optional layers: vision:=true (perception nodes), orbslam:=true (ORB-SLAM3 pose),
+                 odom_noise:=true (seeded errors in the wheel odometry, honest fusion test),
                  nav:=true (Nav2),
                  viewer:=true (browser 3D viewer at http://127.0.0.1:8080, replaces RViz2 for 3D)
 
@@ -13,13 +15,16 @@ Usage:
     ros2 launch ugv_navigation full_stack.launch.py slam:=false vision:=true
     ros2 launch ugv_navigation full_stack.launch.py viewer:=true
     ros2 launch ugv_navigation full_stack.launch.py orbslam:=true viewer:=true world:=offroad_sparse
+    ros2 launch ugv_navigation full_stack.launch.py orbslam:=true odom_noise:=true noise_seed:=7
 
 orbslam:=true needs the ORB-SLAM3 workspace sourced first (source ~/orbslam_ws/install/setup.bash,
 see README 4.4) and a textured world (offroad_sparse or offroad_forest).
 
-Phase 0 state: `vision` is off by default because the perception nodes are
-interface-only until Phases 3/6/7, and `nav` is off by default because the Nav2
-parameter file is a stub until Phase 4. Turning `nav` on now will fail.
+State: `vision` is off by default because the perception nodes are interface-only until
+Phases 3/6/7, and `nav` is off by default because the Nav2 parameter file is a stub until
+Phase 4. Turning `nav` on now will fail. `localization:=false` leaves the TF tree without an
+odom -> base_footprint transform (the URDF no longer publishes it), so only use it if you run
+the EKF yourself.
 
 Spawn pose / viewer options: x:=2.0 y:=-1.0 yaw:=1.57 voxel_size:=0.08 open_browser:=true
 """
@@ -105,6 +110,16 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration("orbslam")))],
     )
 
+    # EKF + status (+ noisy odometry): owns odom -> base_footprint, so it starts with the mapping.
+    localization = TimerAction(
+        period=delay,
+        actions=[GroupAction(
+            [_include("ugv_vision", "launch", "localization.launch.py", use_sim_time="true",
+                      odom_noise=LaunchConfiguration("odom_noise"),
+                      noise_seed=LaunchConfiguration("noise_seed"))],
+            condition=IfCondition(LaunchConfiguration("localization")))],
+    )
+
     navigation = TimerAction(
         period=delay,
         actions=[GroupAction(
@@ -121,7 +136,13 @@ def generate_launch_description():
         DeclareLaunchArgument("slam", default_value="true",
                               description="Start stereo_image_proc and RTAB-Map"),
         DeclareLaunchArgument("vision", default_value="false",
-                              description="Start perception nodes and the EKF"),
+                              description="Start the perception nodes (interface-only until Phases 3/6/7)"),
+        DeclareLaunchArgument("localization", default_value="true",
+                              description="Start the EKF (owns odom -> base_footprint) and the status node"),
+        DeclareLaunchArgument("odom_noise", default_value="false",
+                              description="Inject seeded errors into the wheel odometry (EKF reads /odom_noisy)"),
+        DeclareLaunchArgument("noise_seed", default_value="42",
+                              description="Seed of the injected systematic odometry errors"),
         DeclareLaunchArgument("orbslam", default_value="false",
                               description="Start ORB-SLAM3 + localization_node (needs the slam stereo chain)"),
         DeclareLaunchArgument("viewer", default_value="false",
@@ -140,6 +161,7 @@ def generate_launch_description():
                               description="Seconds to wait for Gazebo before the rest starts"),
         sim,
         perception_chain,
+        localization,
         vision,
         orbslam,
         viewer,

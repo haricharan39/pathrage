@@ -22,7 +22,9 @@ def generate_launch_description():
         ('right/image_rect', '/stereo_camera/right/image_rect'),
         ('left/camera_info',  '/stereo_camera/left/camera_info'),
         ('right/camera_info', '/stereo_camera/right/camera_info'),
-        ('odom', '/odom'),
+        # Phase 2: the fused EKF pose, not the raw wheel odometry. With odom_frame_id set, RTAB-Map
+        # reads odometry from TF (odom -> base_footprint), which the EKF now owns, so both agree.
+        ('odom', '/odometry/filtered'),
     ]
     return LaunchDescription([
         Node(package='rtabmap_slam', executable='rtabmap', name='rtabmap',

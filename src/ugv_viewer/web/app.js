@@ -206,13 +206,14 @@ const frustum = (() => {
 })();
 
 // ---------------------------------------------------------------- trajectories, plan, goal
-// Three polylines: driven path (TF base pose, yellow), ORB-SLAM3 (cyan), ground truth (green).
-function makeTrack(color) {
+// Four polylines: fused path (TF base pose from the EKF, yellow), ORB-SLAM3 (cyan), ground truth
+// (green) and the noisy wheel odometry (dim red).
+function makeTrack(color, opacity = 1) {
   const pos = new Float32Array(TRAJ_CAP * 3);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
   geo.setDrawRange(0, 0);
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity }));
   line.frustumCulled = false;
   scene.add(line);
   const track = { pos, geo, line, n: 0 };
@@ -229,7 +230,8 @@ function makeTrack(color) {
   track.reset = (pts) => { track.n = 0; geo.setDrawRange(0, 0); for (const p of pts) track.add(p); };
   return track;
 }
-const tracks = { driven: makeTrack(0xffd23e), slam: makeTrack(0x00f0ff), gt: makeTrack(0x39ff6a) };
+const tracks = { driven: makeTrack(0xffd23e), slam: makeTrack(0x00f0ff), gt: makeTrack(0x39ff6a),
+                 noisy: makeTrack(0xff5a4d, 0.55) };
 const trackOf = (m) => tracks[m.which || 'driven'] || tracks.driven;
 
 const planPos = new Float32Array(PLAN_CAP * 3);
@@ -330,6 +332,7 @@ bind('lTier1', (e) => { tier1.visible = e.checked; });
 bind('lTraj', (e) => { tracks.driven.line.visible = e.checked; });
 bind('lSlam', (e) => { tracks.slam.line.visible = e.checked; });
 bind('lGt', (e) => { tracks.gt.line.visible = e.checked; });
+bind('lNoisy', (e) => { tracks.noisy.line.visible = e.checked; });
 bind('lPlan', (e) => { planLine.visible = e.checked; goal.visible = e.checked && goalSet; });
 bind('lRobot', (e) => { robot.visible = e.checked; });
 bind('lFrustum', (e) => { frustum.visible = e.checked; });
@@ -391,6 +394,11 @@ function updateHud() {
   $('vSlam').textContent = label;
   $('dotSlam').classList.toggle('on', loc.state === 'ok');
   $('vErr').textContent = loc.err == null ? '-' : `${loc.err.toFixed(2)} m`;
+  // Phase 2: fused / degraded (EKF on wheel + gyro only) and the live error of the fused pose
+  const mode = loc.mode || 'off';
+  $('vMode').textContent = mode === 'off' ? 'off' : (mode === 'fused' ? 'fused' : `degraded (${(loc.reason || '').replace('_', ' ')})`);
+  $('dotMode').classList.toggle('on', mode === 'fused');
+  $('vFusedErr').textContent = loc.fused_err == null ? '-' : `${loc.fused_err.toFixed(2)} m`;
   const warn = $('warn');
   let msg = '';
   if (!s.tf_ok) msg = `No TF to '${s.fixed_frame}' yet. Is the simulation running?`;

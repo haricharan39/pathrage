@@ -13,7 +13,12 @@ Interface (see docs/INTERFACES.md, section "3D viewer"):
                                                                 only, rigidly aligned to the fixed frame
                                                                 at the first sample)
         /orb_slam3/tracking_ok        std_msgs/Bool             tracking OK / LOST indicator
+        /odom_noisy                   nav_msgs/Odometry         noisy wheel odometry (Phase 2), dim red
+                                                                trajectory, only present with odom_noise:=true
+        /localization/status          std_msgs/String (JSON)    fused / degraded indicator (Phase 2)
         TF                            <fixed_frame> <- cloud frame / base_footprint
+                                                                (odom -> base_footprint is the fused EKF
+                                                                pose from Phase 2: the yellow path)
     Publishes:
         /goal_pose                    geometry_msgs/PoseStamped only when you double-click the ground
 
@@ -37,7 +42,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import PointCloud2
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
 
 from . import viewer_core as vc
@@ -61,6 +66,9 @@ class ViewerNode(Node):
         p("slam_topic", "/localization/slam_pose")
         p("gt_topic", "/ground_truth/odom")
         p("tracking_ok_topic", "/orb_slam3/tracking_ok")
+        p("noisy_topic", "/odom_noisy")
+        p("status_topic", "/localization/status")
+        p("status_timeout", 2.0)            # s without a /localization/status before the HUD says "off"
         p("pose_timeout", 1.0)              # s without a SLAM pose before the HUD says "no pose"
         p("voxel_size", 0.05)
         p("max_points", 1_500_000)
@@ -98,6 +106,10 @@ class ViewerNode(Node):
         self.traj = []              # driven path (TF base pose), list of [x, y, z]
         self.slam_traj = []         # /localization/slam_pose in the fixed frame
         self.gt_traj = []           # /ground_truth/odom aligned into the fixed frame
+        self.noisy_traj = []        # /odom_noisy (noisy wheel odometry) in the fixed frame
+        self.status_timeout = float(g("status_timeout"))
+        self._last_status = None    # (monotonic time, dict) from /localization/status
+        self._last_noisy = 0.0      # monotonic time of the last accepted /odom_noisy sample
         self.pose_timeout = float(g("pose_timeout"))
         self._gt_align = None       # 4x4 world -> fixed, set from the first ground-truth sample
         self._last_slam = None      # (monotonic time, stamp_s, xyz)
@@ -137,6 +149,8 @@ class ViewerNode(Node):
         self.create_subscription(PoseWithCovarianceStamped, g("slam_topic"), self._on_slam, 10)
         self.create_subscription(Odometry, g("gt_topic"), self._on_gt, qos_profile_sensor_data)
         self.create_subscription(Bool, g("tracking_ok_topic"), self._on_tracking_ok, 10)
+        self.create_subscription(Odometry, g("noisy_topic"), self._on_noisy, qos_profile_sensor_data)
+        self.create_subscription(String, g("status_topic"), self._on_status, 10)
         self.goal_pub = self.create_publisher(PoseStamped, g("goal_topic"), 5)
         self.create_timer(1.0 / max(1.0, float(g("publish_hz"))), self._on_timer)
 
@@ -298,8 +312,34 @@ class ViewerNode(Node):
     def _on_tracking_ok(self, msg):
         self._tracking_ok = bool(msg.data)
 
-    def _loc_status(self):
-        """Dict for the HUD: tracking state, SLAM pose age and the live position error."""
+    def _on_noisy(self, msg):
+        now = time.monotonic()
+        if now - self._last_noisy < 0.1:        # 50 Hz in, 10 Hz is plenty for a trajectory line
+            return
+        tf = self._lookup(msg.header.frame_id, Time())
+        if tf is None:
+            return
+        self._last_noisy = now
+        p = msg.pose.pose.position
+        pt = vc.transform_points(np.array([[p.x, p.y, p.z]], np.float32), *tf)[0]
+        self._add_track("noisy", self.noisy_traj, pt)
+
+    def _on_status(self, msg):
+        try:
+            d = json.loads(msg.data)
+            mode = str(d["mode"])
+        except (ValueError, KeyError, TypeError):
+            return
+        if mode not in ("fused", "degraded"):
+            return
+        self._last_status = (time.monotonic(), {"mode": mode, "reason": str(d.get("reason", ""))})
+
+    def _loc_status(self, base_xyz=None):
+        """Dict for the HUD: tracking state, live SLAM error, fused/degraded mode, live fused error.
+
+        `base_xyz` is the current fused base position (TF, fixed frame); the fused error is its
+        distance to the latest ground-truth point (display only, same alignment as the green path).
+        """
         age = None
         if self._last_slam is not None:
             age = time.monotonic() - self._last_slam[0]
@@ -315,7 +355,15 @@ class ViewerNode(Node):
         if state == "ok" and self._last_gt is not None:
             if abs(self._last_slam[1] - self._last_gt[0]) < 0.2:
                 err = float(np.linalg.norm(self._last_slam[2][:2] - self._last_gt[1][:2]))
-        return {"state": state, "err": None if err is None else round(err, 3)}
+        mode = reason = None
+        if self._last_status is not None and time.monotonic() - self._last_status[0] <= self.status_timeout:
+            mode, reason = self._last_status[1]["mode"], self._last_status[1]["reason"]
+        fused_err = None
+        if base_xyz is not None and self._last_gt is not None:
+            fused_err = float(np.linalg.norm(np.asarray(base_xyz[:2], float) - self._last_gt[1][:2]))
+        return {"state": state, "err": None if err is None else round(err, 3),
+                "mode": mode, "reason": reason,
+                "fused_err": None if fused_err is None else round(fused_err, 3)}
 
     # ------------------------------------------------------------------ periodic work
     def _on_timer(self):
@@ -339,7 +387,8 @@ class ViewerNode(Node):
                  "proc_ms": round(self._proc_ms, 1), "rate": round(self._rate, 1),
                  "clients": self.server.client_count, "tf_ok": tf is not None and self._tf_ok,
                  "fixed_frame": self.fixed}
-        state = {"type": "state", "stats": stats, "loc": self._loc_status()}
+        state = {"type": "state", "stats": stats,
+                 "loc": self._loc_status(tf[0] if tf is not None else None)}
         if tf is not None:
             state["pose"] = [round(v, 4) for v in tf[0] + tf[1]]
             last = self.traj[-1] if self.traj else None
@@ -364,6 +413,7 @@ class ViewerNode(Node):
                 self.traj.clear()
                 self.slam_traj.clear()
                 self.gt_traj.clear()
+                self.noisy_traj.clear()
                 self._gt_align = None           # re-align on the next ground-truth sample
                 self.server.broadcast_reliable(json.dumps({"type": "cleared", "what": "traj"}))
             elif name == "goal":
@@ -389,7 +439,8 @@ class ViewerNode(Node):
         frames = [json.dumps({"type": "hello", "max_points": self.map.max_points,
                               "voxel": self.map.voxel, "fixed_frame": self.fixed})]
         frames += list(self.map.snapshot_chunks())
-        for which, store in (("driven", self.traj), ("slam", self.slam_traj), ("gt", self.gt_traj)):
+        for which, store in (("driven", self.traj), ("slam", self.slam_traj), ("gt", self.gt_traj),
+                             ("noisy", self.noisy_traj)):
             frames.append(json.dumps({"type": "traj_set", "which": which, "pts": list(store)}))
         for cached in (self._last_plan, self._last_goal):
             if cached:

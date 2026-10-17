@@ -27,6 +27,8 @@ setup(
             "segmentation_node = ugv_vision.segmentation_node:main",
             "costmap_fusion_node = ugv_vision.costmap_fusion_node:main",
             "localization_node = ugv_vision.localization_node:main",
+            "odom_noise_node = ugv_vision.odom_noise_node:main",
+            "localization_status_node = ugv_vision.localization_status_node:main",
         ],
     },
 )

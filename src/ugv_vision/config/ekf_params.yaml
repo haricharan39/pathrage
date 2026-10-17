@@ -1,56 +1,115 @@
-# robot_localization EKF: fuses wheel odometry, the ORB-SLAM3 pose and the IMU gyro.
+# robot_localization EKF (Phase 2): fuses wheel odometry, the ORB-SLAM3 pose and the IMU gyro
+# into ONE pose, /odometry/filtered, and owns the transform odom -> base_footprint.
 #
-# Transform ownership (docs/INTERFACES.md):
-#   odom -> base_footprint : this EKF   (only once Phase 2 turns off Gazebo's odom TF)
+# Transform ownership (docs/INTERFACES.md section 2), one publisher per transform:
+#   odom -> base_footprint : this EKF   (publish_tf true; the URDF has publish_odom_tf false)
 #   map  -> odom           : RTAB-Map
-#
-# publish_tf is FALSE in Phase 0 because Gazebo's diff-drive plugin still publishes
-# odom -> base_footprint, and two publishers of one transform break the TF tree.
-# Phase 2: set publish_tf: true AND set <publish_odom_tf>false in the URDF together.
+# The two switches belong together: if the URDF publishes the odom TF too, or neither does, the
+# TF tree breaks.
 #
 # Config matrix order (15 values per input):
 #   x, y, z,  roll, pitch, yaw,  vx, vy, vz,  vroll, vpitch, vyaw,  ax, ay, az
 #
-# Values are the starting point, not yet tuned (Phase 2).
+# The wheel odometry topic (odom0) is /odom_noisy when launched with odom_noise:=true and the
+# clean /odom otherwise; localization.launch.py overrides the value below.
+#
+# STARTING VALUES, NOT YET TUNED. Tune the process noise against routes R1-R3 with
+# tools/eval_fusion.py (ATE of noisy wheel odometry vs ORB-SLAM3 vs fused), not by feel.
 
 ekf_filter_node:
   ros__parameters:
     use_sim_time: true
-    frequency: 30.0
-    two_d_mode: true          # UGV assumed planar; revisit if slopes matter
-    publish_tf: false         # enable in Phase 2 (see header)
+    frequency: 50.0           # same rate as Gazebo's odom TF, which this node replaces
+    two_d_mode: true          # planar robot: z, roll, pitch are projected out (ramps are flattened)
+    publish_tf: true          # this node owns odom -> base_footprint from Phase 2
+    predict_to_current_time: true   # keep publishing on wheel + gyro when ORB-SLAM3 is silent
+    print_diagnostics: false
     map_frame: map
     odom_frame: odom
     base_link_frame: base_footprint
     world_frame: odom
+    publish_acceleration: false
 
-    # Wheel odometry from Gazebo diff-drive (/odom): use velocities only, so the same
-    # motion is not counted twice through the position that this EKF itself produces.
-    odom0: /odom
+    # Wheel odometry: forward speed and yaw rate only. Positions are NOT used, so the same motion
+    # is not counted twice through the pose this EKF itself produces. The covariance in the message
+    # (set by odom_noise_node) counts the injected systematic errors as noise.
+    odom0: /odom_noisy
     odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  false, false,
                    false, false, true,
                    false, false, false]
 
-    # ORB-SLAM3 pose via ugv_vision/localization_node (Phase 1): base_footprint pose in the
-    # odom frame, relative to the first accepted frame, with covariance (inflated after jumps
-    # and new maps). Absolute fusion and jump rejection are tuned in Phase 2.
+    # ORB-SLAM3 via ugv_vision/localization_node: base_footprint pose in the odom frame (same frame
+    # as this EKF's world_frame), with covariance (inflated after jumps and new maps). Fused as an
+    # ABSOLUTE x, y, yaw. A measurement more than `rejection_threshold` standard deviations from the
+    # prediction is rejected, not trusted: a pose that jumped far (relocalisation error) cannot drag
+    # the estimate. Too small a value can lock the filter out after a long ORB-SLAM3 outage (the
+    # wheel odometry has drifted, every new pose looks wrong): check this in the kill test.
     pose0: /localization/slam_pose
     pose0_queue_size: 10
+    pose0_differential: false
+    pose0_relative: false
+    pose0_rejection_threshold: 6.0
     pose0_config: [true,  true,  false,
                    false, false, true,
                    false, false, false,
                    false, false, false,
                    false, false, false]
 
-    # IMU: angular velocity ONLY. Gazebo's IMU orientation is the simulator's true
-    # orientation (perfect absolute yaw), so orientation must not be fused.
+    # IMU: angular velocity ONLY. Gazebo's IMU orientation is the simulator's true orientation
+    # (perfect absolute yaw), so orientation must not be fused. The simulated gyro has noise
+    # (0.0005 rad/s) but no bias, so it is a better gyro than a real one: say so in the limitations.
     imu0: /camera/imu
     imu0_queue_size: 50
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: false
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
                   true,  true,  true,
                   false, false, false]
+
+    # Process noise (diagonal, same order as the state). vy and the unmeasured acceleration states
+    # are kept small on purpose: a skid-steer robot has almost no sideways velocity, and an
+    # unobserved velocity must not drift when ORB-SLAM3 is lost.
+    process_noise_covariance: [
+      0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.03, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001
+    ]
+
+    # Start-up uncertainty. The first ORB-SLAM3 pose is anchored to this EKF's own pose, so it starts small.
+    initial_estimate_covariance: [
+      0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001
+    ]
