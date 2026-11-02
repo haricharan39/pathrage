@@ -24,9 +24,8 @@
   Control: libgazebo_ros_diff_drive.so with num_wheel_pairs=2 (front pair + rear pair),
   so left wheels and right wheels receive coordinated velocity commands from /cmd_vel.
   Joint states come from libgazebo_ros_joint_state_publisher.so; wheel TF is published
-  ONLY by robot_state_publisher; odom->base_footprint ONLY by the EKF (ugv_vision, Phase 2): the
-  diff-drive plugin publishes /odom but NOT the transform (publish_odom_tf false). Without the EKF
-  running there is no odom->base_footprint, so start the stack with full_stack.launch.py.
+  ONLY by robot_state_publisher. odom->base_footprint: by the diff-drive plugin in Phase 0/1
+  (publish_odom_tf:=true, default); by the EKF from Phase 2 (publish_odom_tf:=false). Never both.
 -->
 <robot name="visionnav" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
@@ -51,6 +50,10 @@
   <xacro:arg name="camera_height" default="480"/>
   <xacro:arg name="camera_hfov" default="1.3963"/> <!-- 80 deg -->
   <xacro:arg name="camera_fps" default="30"/>
+  <!-- Who publishes odom -> base_footprint?
+       Phase 0/1: true  (the Gazebo diff-drive plugin does it, so the TF tree is complete on its own).
+       Phase 2+ : false (the EKF takes over; never both). Launch with publish_odom_tf:=false. -->
+  <xacro:arg name="publish_odom_tf" default="true"/>
 
   <xacro:property name="chassis_length" value="$(arg chassis_length)"/>
   <xacro:property name="chassis_width" value="$(arg chassis_width)"/>
@@ -69,6 +72,7 @@
   <xacro:property name="camera_height" value="$(arg camera_height)"/>
   <xacro:property name="camera_hfov" value="$(arg camera_hfov)"/>
   <xacro:property name="camera_fps" value="$(arg camera_fps)"/>
+  <xacro:property name="publish_odom_tf" value="$(arg publish_odom_tf)"/>
 
   <!-- ===================== DERIVED VALUES ===================== -->
   <!-- base_link sits at the wheel axle height; base_footprint is on the ground. -->
@@ -373,8 +377,9 @@
 
       <command_topic>cmd_vel</command_topic>
       <publish_odom>true</publish_odom>
-      <!-- Phase 2: the EKF (ekf_params.yaml publish_tf true) owns odom -> base_footprint. Never both. -->
-      <publish_odom_tf>false</publish_odom_tf>
+      <!-- Phase 0/1: plugin publishes odom -> base_footprint. From Phase 2 the EKF owns it
+           (launch with publish_odom_tf:=false). Never both. -->
+      <publish_odom_tf>${'true' if publish_odom_tf else 'false'}</publish_odom_tf>
       <publish_wheel_tf>false</publish_wheel_tf>
       <odometry_topic>odom</odometry_topic>
       <odometry_frame>odom</odometry_frame>

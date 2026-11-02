@@ -1,40 +1,30 @@
 <?xml version="1.0"?>
 <!--
-  Off-road outdoor world stub for the UGV visual navigation project.
+  outdoor_offroad - Phase 0 test world.
 
-  Build order (see the software-only build plan in /docs):
-    1. Start with just the ground plane + sun + a handful of simple
-       obstacle boxes/cylinders standing in for rocks - get Nav2 driving
-       against the depth-only costmap first.
-    2. Add uneven terrain (a heightmap) once the flat-ground version works.
-    3. Add denser obstacles / narrower gaps for stress-testing TEB and the
-       segmentation model later.
+  Textured ground (model://terrain_textured, found via GAZEBO_MODEL_PATH which
+  gazebo.launch.py sets) + sun + a few static obstacles + a goal marker at 10 m.
 
-  TODO: swap the placeholder box/cylinder obstacles below for a heightmap
-  terrain plugin and rock/vegetation models (e.g. from the Gazebo model
-  database) once the basic pipeline is verified end-to-end.
+  The textured ground matters: stereo matching and ORB-SLAM3 need visual features.
+  A flat grey ground_plane makes tracking fail in Phase 1.
+
+  Start the robot at (0,0), facing +X. Obstacles are at least 0.15 m high so the depth
+  obstacle layer (Phase 3) treats them as real obstacles.
 -->
 <sdf version="1.7">
   <world name="outdoor_offroad">
 
-    <include>
-      <uri>model://sun</uri>
-    </include>
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://terrain_textured</uri></include>
 
-    <include>
-      <uri>model://ground_plane</uri>
-    </include>
-
-    <!-- Placeholder obstacles - replace/add more as scenarios get harder -->
     <model name="rock_1">
       <static>true</static>
-      <pose>3 1 0.15 0 0 0</pose>
+      <pose>3 1 0.15 0 0 0.3</pose>
       <link name="link">
-        <collision name="collision">
-          <geometry><box><size>0.4 0.4 0.3</size></box></geometry>
-        </collision>
+        <collision name="collision"><geometry><box><size>0.4 0.4 0.3</size></box></geometry></collision>
         <visual name="visual">
           <geometry><box><size>0.4 0.4 0.3</size></box></geometry>
+          <material><ambient>0.45 0.43 0.40 1</ambient><diffuse>0.45 0.43 0.40 1</diffuse><specular>0.02 0.02 0.02 1</specular></material>
         </visual>
       </link>
     </model>
@@ -43,22 +33,34 @@
       <static>true</static>
       <pose>5 -1.5 0.15 0 0 0</pose>
       <link name="link">
-        <collision name="collision">
-          <geometry><cylinder><radius>0.3</radius><length>0.3</length></cylinder></geometry>
-        </collision>
+        <collision name="collision"><geometry><cylinder><radius>0.3</radius><length>0.3</length></cylinder></geometry></collision>
         <visual name="visual">
           <geometry><cylinder><radius>0.3</radius><length>0.3</length></cylinder></geometry>
+          <material><ambient>0.30 0.30 0.32 1</ambient><diffuse>0.30 0.30 0.32 1</diffuse><specular>0.02 0.02 0.02 1</specular></material>
         </visual>
       </link>
     </model>
 
-    <!-- Goal marker for Point A -> Point B testing (visual only, no collision) -->
+    <model name="rock_3">
+      <static>true</static>
+      <pose>7.5 2.0 0.2 0 0 -0.5</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.6 0.4 0.4</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.6 0.4 0.4</size></box></geometry>
+          <material><ambient>0.55 0.50 0.42 1</ambient><diffuse>0.55 0.50 0.42 1</diffuse><specular>0.02 0.02 0.02 1</specular></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Goal marker for Point A -> Point B tests (visual only, no collision) -->
     <model name="goal_marker">
       <static>true</static>
-      <pose>10 0 0.05 0 0 0</pose>
+      <pose>10 0 0.01 0 0 0</pose>
       <link name="link">
         <visual name="visual">
-          <geometry><cylinder><radius>0.15</radius><length>0.02</length></cylinder></geometry>
+          <geometry><cylinder><radius>0.25</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.10 0.90 0.20 1</ambient><diffuse>0.10 0.90 0.20 1</diffuse><specular>0.02 0.02 0.02 1</specular></material>
         </visual>
       </link>
     </model>

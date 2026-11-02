@@ -8,6 +8,7 @@ Usage:
   ros2 launch ugv_description gazebo.launch.py
   ros2 launch ugv_description gazebo.launch.py gui:=false x:=2.0 yaw:=1.57
   ros2 launch ugv_description gazebo.launch.py world:=offroad_forest      # a name, or a full path
+  ros2 launch ugv_description gazebo.launch.py publish_odom_tf:=false     # Phase 2+: EKF owns odom TF
 """
 import os
 
@@ -27,7 +28,7 @@ def generate_launch_description():
     gazebo_ros_share = get_package_share_directory('gazebo_ros')
 
     xacro_file = os.path.join(pkg_share, 'urdf', 'visionnav.urdf.xacro')
-    default_world = os.path.join(pkg_share, 'worlds', 'outdoor_offroad.world')  # your world (ground_plane + sun + rocks)
+    default_world = os.path.join(pkg_share, 'worlds', 'outdoor_offroad.world')  # textured ground + sun + rocks
 
     # Lets worlds use model://terrain_textured (and any model you add under models/).
     # Existing GAZEBO_MODEL_PATH entries are kept.
@@ -39,11 +40,13 @@ def generate_launch_description():
     world = LaunchConfiguration('world')
     gui = LaunchConfiguration('gui')
     camera_baseline = LaunchConfiguration('camera_baseline')
+    publish_odom_tf = LaunchConfiguration('publish_odom_tf')
 
     robot_description = ParameterValue(
         Command([
             FindExecutable(name='xacro'), ' ', xacro_file,
             ' camera_baseline:=', camera_baseline,
+            ' publish_odom_tf:=', publish_odom_tf,
         ]),
         value_type=str,
     )
@@ -102,6 +105,9 @@ def generate_launch_description():
                               description='Start gzclient'),
         DeclareLaunchArgument('camera_baseline', default_value='0.12',
                               description='Stereo baseline in metres'),
+        DeclareLaunchArgument('publish_odom_tf', default_value='true',
+                              description='true: Gazebo plugin publishes odom->base_footprint '
+                                          '(Phase 0/1). false: the EKF does (Phase 2+).'),
         DeclareLaunchArgument('x', default_value='0.0'),
         DeclareLaunchArgument('y', default_value='0.0'),
         DeclareLaunchArgument('z', default_value='0.05'),

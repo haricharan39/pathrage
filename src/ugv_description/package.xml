@@ -6,7 +6,8 @@
   <description>
     Robot model (URDF/xacro) and Gazebo simulation assets for the outdoor
     UGV used in the vision-based navigation project (SIH PS 26126).
-    Carries the stereo camera + IMU mount and the off-road simulation world.
+    Carries the stereo camera + IMU mount, the off-road simulation worlds,
+    and the Phase 0 verification script.
   </description>
   <maintainer email="you@example.com">Hari Charan</maintainer>
   <license>Apache-2.0</license>
@@ -15,12 +16,20 @@
 
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher_gui</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>gazebo_ros_pkgs</exec_depend>
   <exec_depend>gazebo_plugins</exec_depend>
-  <exec_depend>joint_state_publisher_gui</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+
+  <!-- verify_phase0.py -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
